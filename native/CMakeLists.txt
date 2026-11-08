@@ -111,12 +111,9 @@ if(WIN32)
   # (MinGW would otherwise name it libchronos.dll).
   set_target_properties(chronos PROPERTIES PREFIX "")
 endif()
-if(UNIX AND NOT APPLE)
-  # Flat, unversioned SONAME: the only consumers are the Go binary/CLI and the
-  # packages ship exactly one file (libs/libchronos.so), so a versioned soname
-  # (libchronos.so.1) would break runtime loading from the packaging tree.
-  set_target_properties(chronos PROPERTIES VERSION "" SOVERSION "")
-endif()
+# NOTE: no VERSION/SOVERSION on purpose. The only consumer is the Go binary and
+# the packages ship exactly one file (libs/libchronos.so); a versioned soname
+# (libchronos.so.1) would break runtime loading from the packaging tree.
 if(MINGW)
   # Self-contained DLL: chronos.dll is shipped next to the Go executable, so it
   # must not depend on libstdc++/libgcc/libwinpthread DLLs (CONTRACTS 搂4).
