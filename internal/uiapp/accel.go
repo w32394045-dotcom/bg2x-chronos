@@ -1,10 +1,12 @@
 package uiapp
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/config"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/engine"
+	"github.com/w32394045-dotcom/bg2x-chronos/internal/runtime"
 )
 
 // AccelStatus is the acceleration view consumed by the UI badge
@@ -16,6 +18,15 @@ type AccelStatus struct {
 	Available      []string    `json:"available"`
 	GpuUsable      bool        `json:"gpuUsable"`
 	FallbackReason string      `json:"fallbackReason"`
+
+	// GPU runtime component (docs/CONTRACTS.md v3, P3).
+	GpuRuntime      runtime.State `json:"gpuRuntime"`
+	InstallPhase    string        `json:"installPhase"` // "" | resolving|downloading|installing|done|failed
+	InstallPart     string        `json:"installPart"`  // 当前下载的组件包名
+	InstallDone     int64         `json:"installDone"`
+	InstallTotal    int64         `json:"installTotal"`
+	InstallError    string        `json:"installError"`
+	RestartRequired bool          `json:"restartRequired"`
 }
 
 // GetAccelStatus reports the persisted preference plus the live runtime probe.
@@ -40,13 +51,57 @@ func (c *Core) GetAccelStatus() AccelStatus {
 	if info.FallbackReason == "" {
 		info.FallbackReason = reason
 	}
-	return AccelStatus{
+	status := AccelStatus{
 		Mode:           mode,
 		Active:         info,
 		Available:      available,
 		GpuUsable:      device == "GPU",
 		FallbackReason: reason,
 	}
+	if mgr := c.runtimeManager(); mgr != nil {
+		status.GpuRuntime = mgr.State(runtime.FlavorDirectML)
+		phase, part, done, total, lastErr := mgr.Progress()
+		status.InstallPhase, status.InstallPart = phase, part
+		status.InstallDone, status.InstallTotal, status.InstallError = done, total, lastErr
+	}
+	return status
+}
+
+// runtimeManager returns the runtime component manager (nil in early startup).
+func (c *Core) runtimeManager() *runtime.Manager {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.runtimeMgr
+}
+
+// InstallAccelRuntime downloads and installs the GPU runtime component in the
+// background. Progress is reported through chronos:accel events.
+func (c *Core) InstallAccelRuntime() (AccelStatus, error) {
+	mgr := c.runtimeManager()
+	if mgr == nil {
+		return AccelStatus{}, fmt.Errorf("运行时管理器不可用")
+	}
+	phase, _, _, _, _ := mgr.Progress()
+	if phase == "downloading" || phase == "installing" || phase == "resolving" {
+		return c.GetAccelStatus(), nil
+	}
+	if mgr.Installed(runtime.FlavorDirectML) {
+		return c.GetAccelStatus(), nil
+	}
+	go func() {
+		err := mgr.Install(context.Background())
+		if err != nil {
+			c.log("warn", "GPU 运行时安装失败: "+err.Error())
+		} else {
+			c.log("info", "GPU 运行时安装完成；重启应用后启用 GPU")
+			c.mu.Lock()
+			c.restartRequired = true
+			c.mu.Unlock()
+		}
+		c.emit("chronos:accel", c.GetAccelStatus())
+	}()
+	// Emit a first "resolving" snapshot so the UI reacts immediately.
+	return c.GetAccelStatus(), nil
 }
 
 // SetAccelMode persists "auto" or "cpu" and re-probes the engine. The new mode

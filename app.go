@@ -105,6 +105,9 @@ func (a *App) GetAccelStatus() uiapp.AccelStatus { return a.core.GetAccelStatus(
 func (a *App) SetAccelMode(mode string) (uiapp.AccelStatus, error) {
 	return a.core.SetAccelMode(mode)
 }
+func (a *App) InstallAccelRuntime() (uiapp.AccelStatus, error) {
+	return a.core.InstallAccelRuntime()
+}
 
 // ---- desktop-only native dialogs -----------------------------------------
 

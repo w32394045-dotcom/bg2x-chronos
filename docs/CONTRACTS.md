@@ -105,6 +105,7 @@ SelfTestModel(modelID string) (ModelSelfTest, error)      // v3：体检 + 试�
 GetModelDiagnostics(modelID string) ModelDiagnostics      // v3：可复制的诊断文本
 GetAccelStatus() AccelStatus                              // v3：后端/EP/设备/降级原因
 SetAccelMode(mode string) (AccelStatus, error)            // v3："auto" | "cpu"
+InstallAccelRuntime() (AccelStatus, error)                // v3/P3：下载并安装 GPU 运行时（异步，进度走 chronos:accel + GetAccelStatus）
 UpscaleBatch(req BatchRequest) (BatchResult, error)
 CancelJob(jobID string) bool
 SetConcurrency(n int) error                 // 1..8
@@ -173,6 +174,22 @@ type AccelStatus struct {           // v3
     Available      []string `json:"available"` // 例如 ["CPU","DML"]
     GpuUsable      bool     `json:"gpuUsable"`
     FallbackReason string   `json:"fallbackReason"`
+    // P3：可选 GPU 运行时组件（Windows/DirectML 需下载，Linux 暂不支持 GPU）
+    GpuRuntime      GpuRuntimeState `json:"gpuRuntime"`
+    InstallPhase    string          `json:"installPhase"`  // "" | resolving|downloading|installing|done|failed
+    InstallDone     int64           `json:"installDone"`
+    InstallTotal    int64           `json:"installTotal"`
+    InstallError    string          `json:"installError"`
+    RestartRequired bool            `json:"restartRequired"` // 安装完成后需重启才能激活
+}
+
+type GpuRuntimeState struct {       // P3
+    Flavor      string  `json:"flavor"`      // "directml"
+    Installed   bool    `json:"installed"`
+    Dir         string  `json:"dir"`
+    Installable bool    `json:"installable"`
+    Version     string  `json:"version"`
+    SizeMB      float64 `json:"sizeMb"`
 }
 
 type ModelInfo struct {
@@ -364,6 +381,7 @@ export interface Api {
   GetModelDiagnostics(modelId: string): Promise<ModelDiagnostics>
   GetAccelStatus(): Promise<AccelStatus>
   SetAccelMode(mode: string): Promise<AccelStatus>
+  InstallAccelRuntime(): Promise<AccelStatus>
   UpscaleBatch(req: BatchRequest): Promise<BatchResult>
   CancelJob(jobId: string): Promise<boolean>
   SetConcurrency(n: number): Promise<void>

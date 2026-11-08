@@ -193,6 +193,7 @@ export function createHttpApi(options: HttpTransportOptions = {}): Api {
     GetModelDiagnostics: (modelId) => rpc('GetModelDiagnostics', [modelId]),
     GetAccelStatus: () => rpc('GetAccelStatus', []),
     SetAccelMode: (mode) => rpc('SetAccelMode', [mode]),
+    InstallAccelRuntime: () => rpc('InstallAccelRuntime', []),
   }
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/engine"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/inhibit"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/models"
+	chronosruntime "github.com/w32394045-dotcom/bg2x-chronos/internal/runtime"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/scheduler"
 )
 
@@ -164,6 +165,10 @@ type Core struct {
 	// model downloads (docs/CONTRACTS.md v3 PullModel/CancelPull)
 	pullMu sync.Mutex
 	pulls  map[string]*pullJob
+
+	// optional ONNX Runtime components (P3 GPU runtime download)
+	runtimeMgr      *chronosruntime.Manager
+	restartRequired bool
 }
 
 // New creates the core. Call SetEmitter before Startup to receive the boot
@@ -255,6 +260,19 @@ func (c *Core) initialise() {
 		c.logLocked("warn", "模型目录不可用: "+err.Error())
 	}
 	c.models = store
+
+	// Optional ONNX Runtime components: the GPU runtime (DirectML) lives in the
+	// data dir and must be activated BEFORE the first engine is created, because
+	// the native loader caches a loaded library for the process lifetime.
+	c.runtimeMgr = chronosruntime.NewManager(dataDir)
+	c.runtimeMgr.SetLogger(func(format string, args ...any) {
+		c.log("info", fmt.Sprintf(format, args...))
+	})
+	if settings.AccelMode != config.AccelCPU {
+		if dir, ok := c.runtimeMgr.Activate(chronosruntime.FlavorDirectML); ok {
+			c.logLocked("info", "已启用 GPU 运行时: "+dir)
+		}
+	}
 
 	probe, err := engine.NewProvider(engine.Config{Scale: 2}, 1)
 	if err != nil {

@@ -165,6 +165,16 @@ export interface ImportModelRequest {
   autoDetect: boolean
 }
 
+/** 可选运行时组件（P3：Windows 的 DirectML 运行时需下载）。 */
+export interface GpuRuntimeState {
+  flavor: string
+  installed: boolean
+  dir: string
+  installable: boolean
+  version: string
+  sizeMb: number
+}
+
 /** 加速视图：Active 是实际在用的，其余是这台机器能用的。 */
 export interface AccelStatus {
   /** "auto" | "cpu" */
@@ -173,6 +183,17 @@ export interface AccelStatus {
   available: string[]
   gpuUsable: boolean
   fallbackReason: string
+  /** GPU 运行时组件的状态（可能不存在于旧后端） */
+  gpuRuntime?: GpuRuntimeState
+  /** "" | resolving | downloading | installing | done | failed */
+  installPhase?: string
+  /** 当前下载的组件包名（onnxruntime-directml / directml） */
+  installPart?: string
+  installDone?: number
+  installTotal?: number
+  installError?: string
+  /** 安装完成后需要重启应用才会真正启用 GPU */
+  restartRequired?: boolean
 }
 
 export interface InhibitRequest {

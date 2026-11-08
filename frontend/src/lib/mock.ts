@@ -631,18 +631,39 @@ export const mockApi: Api = {
     emitLog('info', `（浏览器预览）加速方式：${mockAccelMode}`)
     return mockAccelStatus()
   },
+  async InstallAccelRuntime() {
+    mockGpuInstalled = true
+    emitLog('info', '（浏览器预览）已模拟安装 GPU 运行时')
+    return mockAccelStatus()
+  },
 }
 
 /** 浏览器预览的加速状态：永远是 CPU（没有真实运行时）。 */
 let mockAccelMode = 'auto'
+let mockGpuInstalled = false
 function mockAccelStatus(): AccelStatus {
   const info = appInfo().engine
   return {
     mode: mockAccelMode,
     active: info,
-    available: ['CPU'],
+    available: mockGpuInstalled ? ['CPU', 'DML'] : ['CPU'],
     gpuUsable: false,
-    fallbackReason: '（浏览器预览）没有可用的 GPU 执行后端',
+    fallbackReason: mockGpuInstalled
+      ? '（浏览器预览）已安装 GPU 运行时，但预览模式不会真正推理'
+      : '（浏览器预览）没有可用的 GPU 执行后端',
+    gpuRuntime: {
+      flavor: 'directml',
+      installed: mockGpuInstalled,
+      dir: 'C:\\Users\\Public\\Chronos\\runtime\\ort\\directml-1.24.4',
+      installable: false,
+      version: '1.24.4',
+      sizeMb: 11.9,
+    },
+    installPhase: mockGpuInstalled ? 'done' : '',
+    installDone: 0,
+    installTotal: 0,
+    installError: '',
+    restartRequired: false,
   }
 }
 

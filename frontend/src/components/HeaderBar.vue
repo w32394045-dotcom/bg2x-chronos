@@ -22,6 +22,34 @@ const accelReason = computed(
 )
 const accelAvailable = computed(() => accelStatus.value?.available ?? ['CPU'])
 const accelMode = computed(() => accelStatus.value?.mode ?? 'auto')
+const gpuRuntime = computed(() => accelStatus.value?.gpuRuntime ?? null)
+const gpuInstalling = computed(() =>
+  ['resolving', 'downloading', 'installing'].includes(accelStatus.value?.installPhase ?? ''),
+)
+const gpuInstallFailed = computed(() => accelStatus.value?.installPhase === 'failed')
+const gpuInstallPercent = computed(() => {
+  const status = accelStatus.value
+  if (!status) return 0
+  if (status.installPhase === 'installing') return 99
+  const total = status.installTotal || 0
+  if (total <= 0) return 0
+  return Math.min(100, Math.round(((status.installDone || 0) / total) * 100))
+})
+const canInstallGpu = computed(
+  () => !!gpuRuntime.value?.installable && !gpuRuntime.value?.installed && !gpuInstalling.value,
+)
+const gpuRuntimeLabel = computed(() => {
+  const component = gpuRuntime.value
+  if (!component) return '未知'
+  if (component.installed) return `已安装 ${component.version}`
+  if (component.installable) return `未安装（约 ${component.sizeMb} MB）`
+  return '此平台不需要'
+})
+const restartRequired = computed(() => accelStatus.value?.restartRequired === true)
+
+async function installGpu(): Promise<void> {
+  await mm.installAccelRuntime()
+}
 
 const engineToneFallback = computed(() => {
   const backend = appInfo.value?.engine?.backend
@@ -168,6 +196,38 @@ async function setMode(mode: string): Promise<void> {
               仅 CPU
             </button>
           </div>
+          <div class="mt-2.5 border-t border-line-soft pt-2">
+            <div class="flex items-center justify-between">
+              <span>GPU 运行时</span>
+              <span class="text-mute-strong">{{ gpuRuntimeLabel }}</span>
+            </div>
+            <div v-if="gpuInstalling" class="mt-1.5">
+              <div class="h-1 w-full overflow-hidden rounded-full bg-ink-700">
+                <div class="h-full bg-brand-400 transition-[width] duration-200" :style="{ width: `${gpuInstallPercent}%` }" />
+              </div>
+              <p class="mt-1 text-[10px] text-mute-soft">
+                {{ accelStatus?.installPhase === 'installing' ? '正在解压安装…' : `下载中 ${gpuInstallPercent}%` }}`n                <span v-if="accelStatus?.installPart"> · {{ accelStatus.installPart }}</span>
+              </p>
+            </div>
+            <button
+              v-else-if="canInstallGpu"
+              type="button"
+              class="btn-ghost mt-1.5 w-full"
+              @click="installGpu"
+            >
+              下载 GPU 运行时（DirectML {{ gpuRuntime?.sizeMb }} MB）
+            </button>
+            <p v-if="gpuInstallFailed" class="mt-1 text-[10px] text-rose-300">
+              安装失败：{{ accelStatus?.installError }}
+            </p>
+            <p v-if="restartRequired" class="mt-1 text-[10px] text-amber-300">
+              安装完成，重启应用后启用 GPU。
+            </p>
+            <p class="mt-1 text-[10px] leading-relaxed text-mute-soft">
+              GPU 运行时是可选下载；没有它或没有 GPU 时会自动降级为 CPU，状态标不会造假。
+            </p>
+          </div>
+
           <p class="mt-2 text-[10px] text-mute-soft">
             切换只影响新任务；GPU 需要运行时带对应执行后端，否则自动降级为 CPU。
           </p>

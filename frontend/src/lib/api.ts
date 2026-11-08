@@ -74,6 +74,8 @@ export interface Api {
   GetAccelStatus(): Promise<AccelStatus>
   /** "auto" | "cpu" */
   SetAccelMode(mode: string): Promise<AccelStatus>
+  /** 下载并安装 GPU 运行时组件（进度走 chronos:accel / 轮询 GetAccelStatus）。 */
+  InstallAccelRuntime(): Promise<AccelStatus>
 }
 
 /**
@@ -115,6 +117,7 @@ export function createWailsApi(): Api {
     GetModelDiagnostics: bind('GetModelDiagnostics'),
     GetAccelStatus: bind('GetAccelStatus'),
     SetAccelMode: bind('SetAccelMode'),
+    InstallAccelRuntime: bind('InstallAccelRuntime'),
   }
 }
 

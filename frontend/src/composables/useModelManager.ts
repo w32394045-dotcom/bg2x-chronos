@@ -141,6 +141,34 @@ export function useModelManager() {
     }
   }
 
+  /** 下载/安装 GPU 运行时，并轮询进度（后端也会推 chronos:accel）。 */
+  async function installAccelRuntime(): Promise<void> {
+    try {
+      accel.value = await api.InstallAccelRuntime()
+      startAccelPolling()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  let accelPollTimer: ReturnType<typeof setInterval> | null = null
+
+  function startAccelPolling(): void {
+    if (accelPollTimer) return
+    accelPollTimer = setInterval(async () => {
+      try {
+        accel.value = await api.GetAccelStatus()
+      } catch {
+        // keep the last known state; a failed poll is not fatal
+      }
+      const phase = accel.value?.installPhase ?? ''
+      if (phase === '' || phase === 'done' || phase === 'failed') {
+        if (accelPollTimer) clearInterval(accelPollTimer)
+        accelPollTimer = null
+      }
+    }, 700)
+  }
+
   onMounted(() => {
     offs.push(
       onEvent<ModelPullState>('chronos:model', (st) => {
@@ -158,6 +186,7 @@ export function useModelManager() {
 
   onUnmounted(() => {
     for (const off of offs) off()
+    if (accelPollTimer) clearInterval(accelPollTimer)
   })
 
   return {
@@ -179,5 +208,6 @@ export function useModelManager() {
     importModel,
     loadAccel,
     setAccelMode,
+    installAccelRuntime,
   }
 }

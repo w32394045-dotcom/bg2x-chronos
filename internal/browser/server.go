@@ -478,6 +478,8 @@ func (s *Server) dispatch(method string, args []json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return s.core.SetAccelMode(mode)
+	case "InstallAccelRuntime":
+		return s.core.InstallAccelRuntime()
 	case "Reveal":
 		var p string
 		if err := decodeArg(args, 0, &p); err != nil {
