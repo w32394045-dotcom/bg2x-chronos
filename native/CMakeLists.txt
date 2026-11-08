@@ -1,4 +1,4 @@
-﻿# Project Chronos 鈥?native compute layer (C++17)
+# Project Chronos 鈥?native compute layer (C++17)
 #
 # Builds:
 #   chronos             shared library: chronos.dll (Windows) / libchronos.so (Linux)
@@ -112,7 +112,10 @@ if(WIN32)
   set_target_properties(chronos PROPERTIES PREFIX "")
 endif()
 if(UNIX AND NOT APPLE)
-  set_target_properties(chronos PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
+  # Flat, unversioned SONAME: the only consumers are the Go binary/CLI and the
+  # packages ship exactly one file (libs/libchronos.so), so a versioned soname
+  # (libchronos.so.1) would break runtime loading from the packaging tree.
+  set_target_properties(chronos PROPERTIES VERSION "" SOVERSION "")
 endif()
 if(MINGW)
   # Self-contained DLL: chronos.dll is shipped next to the Go executable, so it
