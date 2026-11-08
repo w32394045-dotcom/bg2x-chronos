@@ -1,5 +1,5 @@
-/*
- * Project Chronos — C ABI tests.
+﻿/*
+ * Project Chronos 鈥?C ABI tests.
  *
  * Covers: ABI/version/backend introspection, thread-local last_error, option
  * validation, session lifecycle, process success and every documented error
@@ -175,8 +175,11 @@ TEST(c_api, options_validation) {
   CHECK_EQ(chronos_session_scale(session), 1);
   chronos_session_free(session);
 
-  /* Options NULL also means defaults. */
-  CHECK(create_or_fail(3, nullptr) != nullptr);
+  /* Options NULL also means defaults. Free it: the sanitizer build treats a
+   * leaked session as a test failure. */
+  chronos_session* defaulted = create_or_fail(3, nullptr);
+  CHECK(defaulted != nullptr);
+  chronos_session_free(defaulted);
 }
 
 TEST(c_api, unsupported_scale_and_model_path) {
