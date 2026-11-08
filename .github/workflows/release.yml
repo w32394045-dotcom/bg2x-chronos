@@ -1,4 +1,4 @@
-﻿# Project Chronos - release pipeline.
+# Project Chronos - release pipeline.
 #
 # Triggers:
 #   * push of a tag matching v*  (e.g. git tag v0.2.0 && git push origin v0.2.0)
@@ -80,7 +80,7 @@ jobs:
           version: 11.28.5
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
@@ -155,7 +155,7 @@ jobs:
           version: 11.28.5
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm

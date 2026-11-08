@@ -1,4 +1,4 @@
-﻿# Project Chronos - main CI pipeline.
+# Project Chronos - main CI pipeline.
 #
 # Jobs and the artifacts they publish:
 #   native-linux       -> native-linux       (libchronos.so, chronos_native_cli, headers)
@@ -272,7 +272,7 @@ jobs:
           version: 11.28.5
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
@@ -321,7 +321,7 @@ jobs:
           version: 11.28.5
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
