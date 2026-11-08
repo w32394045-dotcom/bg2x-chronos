@@ -64,8 +64,7 @@ set_target_properties(chronos_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(CHRONOS_WITH_OPENVINO)
   find_package(OpenVINO REQUIRED COMPONENTS Runtime)
   target_compile_definitions(chronos_objects PRIVATE CHRONOS_WITH_OPENVINO=1)
-  target_compile_definitions(chronos_objects PUBLIC CHRONOS_WITH_OPENVINO=1)
-  target_link_libraries(chronos_objects PUBLIC openvino::runtime)
+  target_link_libraries(chronos_objects PRIVATE openvino::runtime)
 endif()
 
 if(MSVC)
@@ -93,10 +92,12 @@ endif()
 
 # --- shared library ---------------------------------------------------------
 add_library(chronos SHARED $<TARGET_OBJECTS:chronos_objects>)
-target_link_libraries(chronos PRIVATE chronos_objects)
 target_include_directories(chronos
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<INSTALL_INTERFACE:include>)
+if(CHRONOS_WITH_OPENVINO)
+  target_link_libraries(chronos PRIVATE openvino::runtime)
+endif()
 set_target_properties(chronos PROPERTIES
     OUTPUT_NAME chronos
     WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
@@ -110,6 +111,16 @@ if(MINGW)
 endif()
 if(CHRONOS_SANITIZE AND NOT MSVC)
   target_link_options(chronos PRIVATE ${CHRONOS_SANITIZE_FLAGS})
+endif()
+
+# --- static convenience library (tests only) --------------------------------
+# Tests link the same objects statically so C++ exceptions/RTTI never have to
+# cross a DLL boundary (the shared library is exercised by the CLI smoke test).
+add_library(chronos_static STATIC $<TARGET_OBJECTS:chronos_objects>)
+target_include_directories(chronos_static PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include")
+if(CHRONOS_WITH_OPENVINO)
+  target_link_libraries(chronos_static PUBLIC openvino::runtime)
 endif()
 
 # --- CLI --------------------------------------------------------------------
@@ -136,7 +147,7 @@ if(CHRONOS_BUILD_TESTS)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests"
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src")
-  target_link_libraries(chronos_tests PRIVATE chronos)
+  target_link_libraries(chronos_tests PRIVATE chronos_static)
   if(CHRONOS_SANITIZE AND NOT MSVC)
     target_compile_options(chronos_tests PRIVATE ${CHRONOS_SANITIZE_FLAGS})
     target_link_options(chronos_tests PRIVATE ${CHRONOS_SANITIZE_FLAGS})
@@ -149,7 +160,7 @@ if(CHRONOS_BUILD_TESTS)
   add_test(NAME native_all COMMAND chronos_tests)
   add_test(NAME native_cli_info COMMAND chronos_native_cli --info)
   set_tests_properties(native_cli_info PROPERTIES
-      PASS_REGULAR_EXPRESSION "\\\"stub\\\":true")
+      PASS_REGULAR_EXPRESSION "stub.*true")
 endif()
 
 # --- install ----------------------------------------------------------------

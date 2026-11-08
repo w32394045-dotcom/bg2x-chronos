@@ -17,7 +17,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 #include "harness.h"
 #include "test_util.h"
 

@@ -1,4 +1,4 @@
-//go:build cgo && chronos_native
+﻿//go:build cgo && chronos_native
 
 package engine
 
@@ -39,6 +39,8 @@ func newNativeEngine(cfg Config) (Engine, error) {
 	opts.overlap = C.int(cfg.Overlap)
 	opts.threads = C.int(cfg.Threads)
 	opts.device_index = C.int(cfg.DeviceIndex)
+	// PNG output always keeps alpha so transparent PNGs round-trip correctly.
+	opts.flags |= C.int(C.CHRONOS_FLAG_PRESERVE_ALPHA)
 	if cfg.Fast {
 		opts.flags |= C.int(C.CHRONOS_FLAG_FAST)
 	}
