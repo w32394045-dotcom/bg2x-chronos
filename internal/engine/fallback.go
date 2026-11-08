@@ -1,4 +1,4 @@
-package engine
+﻿package engine
 
 import (
 	"context"
@@ -51,7 +51,7 @@ func planTiles(width, height, tileSize, overlap int) []tileRect {
 	if tileSize <= 0 {
 		tileSize = DefaultTile
 	}
-	if overlap < 0 || overlap >= tileSize {
+	if overlap <= 0 || overlap >= tileSize {
 		overlap = DefaultOverlap
 		if overlap >= tileSize {
 			overlap = tileSize / 4

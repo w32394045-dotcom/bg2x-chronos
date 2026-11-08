@@ -1,4 +1,4 @@
-package engine
+﻿package engine
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Hard limits from the architecture spec (docs/CONTRACTS.md §0 rule 5).
+// Hard limits from the architecture spec (docs/CONTRACTS.md 搂0 rule 5).
 const (
 	MaxConcurrency  = 8
 	DefaultTile     = 256
@@ -110,7 +110,7 @@ func (c Config) Normalize() Config {
 	if c.TileSize > MaxTileSize {
 		c.TileSize = MaxTileSize
 	}
-	if c.Overlap < 0 {
+	if c.Overlap <= 0 {
 		c.Overlap = DefaultOverlap
 	}
 	if c.Overlap >= c.TileSize {
