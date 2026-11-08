@@ -554,3 +554,40 @@ TEST(ort, sidecar_tensor_names) {
   std::printf("ort: unknown tensor name error: %s\n", bad_error.c_str());
   remove_sidecar_model(bad);
 }
+
+TEST(ort, model_inspect_reports_static_scale) {
+  require_runtime();
+  /* chronos_model_inspect() must derive the scale from static dims and report
+   * the real input/output names, without running inference. */
+  const std::string model = static_fixture_path();
+  const int required = chronos_model_inspect(model.c_str(), nullptr, 0);
+  if (required <= 0) std::printf("ort: inspect error: %s\n", chronos_last_error());
+  CHECK(required > 0);
+  std::vector<char> buffer(static_cast<size_t>(required) + 1, '\0');
+  const int written = chronos_model_inspect(model.c_str(), buffer.data(),
+                                            static_cast<int>(buffer.size()));
+  CHECK_EQ(written, required);
+  const std::string report(buffer.data(), static_cast<size_t>(written));
+  std::printf("ort: inspect report: %s\n", report.c_str());
+  CHECK(report.find("\"available\":true") != std::string::npos);
+  CHECK(report.find("\"scale\":2") != std::string::npos);
+  CHECK(report.find("\"name\":\"input\"") != std::string::npos);
+  CHECK(report.find("\"name\":\"output\"") != std::string::npos);
+  CHECK(report.find("\"warnings\":[]") != std::string::npos);
+}
+
+TEST(ort, model_inspect_reports_dynamic_model_warnings) {
+  require_runtime();
+  /* The dynamic-shape toy model cannot report a scale; the report must say so
+   * through warnings instead of inventing one. */
+  const std::string model = fixture_path();
+  const int required = chronos_model_inspect(model.c_str(), nullptr, 0);
+  CHECK(required > 0);
+  std::vector<char> buffer(static_cast<size_t>(required) + 1, '\0');
+  const int written = chronos_model_inspect(model.c_str(), buffer.data(),
+                                            static_cast<int>(buffer.size()));
+  CHECK(written > 0);
+  const std::string report(buffer.data(), static_cast<size_t>(written));
+  CHECK(report.find("\"scale\":0") != std::string::npos);
+  CHECK(report.find("dynamic") != std::string::npos);
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Icon from './Icon.vue'
+import ImportModelDialog from './ImportModelDialog.vue'
 import type { ChronosStore } from '@/composables/useChronos'
 import { useModelManager } from '@/composables/useModelManager'
 import {
@@ -61,6 +62,12 @@ const recommendedModel = computed(
     null,
 )
 const mmError = computed(() => mm.error.value)
+const importOpen = ref(false)
+
+function onImported(): void {
+  void loadModels(true)
+  importOpen.value = false
+}
 
 function pullOf(id: string) {
   return pullsMap.value[id] ?? null
@@ -165,7 +172,18 @@ function setScale(value: number): void {
       >
         <Icon name="refresh" :size="14" :class="modelsLoading ? 'animate-spin' : ''" />
       </button>
+      <button
+        type="button"
+        class="btn-ghost"
+        title="导入外部 .onnx 模型"
+        @click="importOpen = true"
+      >
+        <Icon name="download" :size="13" />
+        导入模型
+      </button>
     </div>
+
+    <ImportModelDialog v-if="importOpen" @close="importOpen = false" @imported="onImported" />
 
     <div class="panel-body space-y-3.5">
       <!-- 模型 -->

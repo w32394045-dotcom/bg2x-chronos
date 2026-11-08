@@ -21,6 +21,7 @@
 #include "chronos/options.h"
 #include "chronos/pipeline.h"
 #include "common.h"
+#include "ort_inspect.h"
 #include "ort_loader.h"
 
 #ifndef CHRONOS_NATIVE_VERSION
@@ -464,6 +465,31 @@ int chronos_session_cancelled(const chronos_session* session) {
     return session->pipeline->cancelled() ? 1 : 0;
   } catch (...) {
     return 0;
+  }
+}
+
+int chronos_model_inspect(const char* model_path, char* buf, int buf_len) {
+  try {
+    clear_last_error();
+    if (model_path == nullptr || *model_path == '\0') {
+      set_last_error("chronos_model_inspect: model_path is empty");
+      return CHRONOS_ERR_PARAM;
+    }
+    std::string json;
+    std::string error;
+    if (!chronos::inspect_model(std::string(model_path), &json, &error)) {
+      set_last_error(error.empty() ? std::string("cannot inspect model") : error);
+      return CHRONOS_ERR_MODEL;
+    }
+    if (buf == nullptr || buf_len <= 0) return static_cast<int>(json.size());
+    const size_t capacity = static_cast<size_t>(buf_len);
+    const size_t count = json.size() < capacity - 1 ? json.size() : capacity - 1;
+    std::memcpy(buf, json.data(), count);
+    buf[count] = '\0';
+    return static_cast<int>(count);
+  } catch (...) {
+    set_last_error("chronos_model_inspect: unexpected error");
+    return CHRONOS_ERR_UNKNOWN;
   }
 }
 

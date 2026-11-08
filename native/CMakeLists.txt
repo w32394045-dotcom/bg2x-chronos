@@ -52,6 +52,7 @@ set(CHRONOS_SOURCES
     src/platform_io.cpp
     src/ort_loader.cpp
     src/ort_sidecar.cpp
+    src/ort_inspect.cpp
     src/backend_ort.cpp
     src/pipeline.cpp
     src/c_api.cpp)

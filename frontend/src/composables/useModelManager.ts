@@ -74,8 +74,7 @@ export function useModelManager() {
     }
   }
 
-  async function diagnostics(id: string): Promise<string> {
-    try {
+  async function diagnostics(id: string): Promise<string> {    try {
       const diag = await api.GetModelDiagnostics(id)
       const lines = [
         `model: ${diag.modelId}`,
@@ -97,6 +96,32 @@ export function useModelManager() {
       await navigator.clipboard.writeText(text)
     } catch {
       // 无剪贴板权限时静默忽略（桌面 WebView 通常允许）
+    }
+  }
+
+  /** 桌面原生文件选择；浏览器模式返回空串，由调用方改用路径输入/PathPicker。 */
+  async function pickModelFile(): Promise<string> {
+    try {
+      return await api.PickModelFile()
+    } catch {
+      return ''
+    }
+  }
+
+  /** 导入外部模型；成功后刷新列表并返回新模型（失败返回 null 并写入 error）。 */
+  async function importModel(path: string, name = '', autoDetect = true): Promise<ModelInfo | null> {
+    error.value = ''
+    if (!path.trim()) {
+      error.value = '请选择或输入 .onnx 模型路径'
+      return null
+    }
+    try {
+      const info = await api.ImportModel({ path: path.trim(), name: name.trim(), autoDetect })
+      await api.RefreshModels()
+      return info
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      return null
     }
   }
 
@@ -150,6 +175,8 @@ export function useModelManager() {
     selfTest,
     diagnostics,
     copyDiagnostics,
+    pickModelFile,
+    importModel,
     loadAccel,
     setAccelMode,
   }

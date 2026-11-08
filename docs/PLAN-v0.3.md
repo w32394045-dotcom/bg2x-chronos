@@ -183,3 +183,4 @@ UI 三态 badge：🟢 `GPU · DirectML`｜⚪ `CPU · N 线程`｜🟡 `已降�
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-08 | 初版：范围锁定、ADR-003、SR Contract v2、布局 v2、分批 PR、CI 与风险 |
+| 2026-11-08 | P4 落地：`chronos_model_inspect()` 原生图元数据探测（scale/形状/warnings）+ 导入自动探测 + 导入对话框 + `docs/MODEL_COMPAT.md` |

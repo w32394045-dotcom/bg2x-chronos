@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/w32394045-dotcom/bg2x-chronos/internal/engine"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/models"
 )
 
@@ -347,7 +348,27 @@ func (c *Core) ImportModel(req ImportModelRequest) (ModelInfo, error) {
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(onnxPath), filepath.Ext(onnxPath))
 	}
+
+	// Optional graph introspection: derive the scale from the model itself and
+	// surface SR-contract warnings instead of silently assuming x4.
 	scale := 4
+	var detectNotes []string
+	var inspection *engine.ModelInspection
+	if req.AutoDetect {
+		if insp, err := engine.InspectModel(dst); err == nil {
+			inspection = &insp
+			if insp.Scale > 0 {
+				scale = insp.Scale
+			}
+			detectNotes = append(detectNotes, insp.Warnings...)
+			if insp.Scale <= 0 {
+				detectNotes = append(detectNotes, "无法从静态形状推导倍率，已按 x4 处理；请在 model.json 的 outputs[0].scale 修正")
+			}
+		} else {
+			detectNotes = append(detectNotes, "自动探测不可用（"+err.Error()+"），倍率已按 x4 处理")
+		}
+	}
+
 	sc := models.Sidecar{
 		Inputs:  []models.SidecarInput{{Name: "", Source: "image"}},
 		Outputs: []models.SidecarOutput{{Name: "", Scale: scale, Crop: 0}},
@@ -359,8 +380,17 @@ func (c *Core) ImportModel(req ImportModelRequest) (ModelInfo, error) {
 			Notes: name,
 		},
 	}
-	if req.AutoDetect {
-		sc.Meta.Notes = name + " (scale/归一化待自动探测)"
+	if inspection != nil && len(inspection.Outputs) > 0 {
+		sc.Outputs[0].Name = inspection.Outputs[0].Name
+	}
+	if inspection != nil && len(inspection.Inputs) > 0 {
+		sc.Inputs[0].Name = inspection.Inputs[0].Name
+	}
+	if inspection != nil && len(inspection.Inputs) > 0 && inspection.Inputs[0].Dtype == "float16" {
+		sc.Constraints.DType = "fp16"
+	}
+	for _, note := range detectNotes {
+		sc.Meta.Notes += "\n" + note
 	}
 	for _, w := range c.ImportWarnings(dir) {
 		sc.Meta.Notes += "\n" + w
@@ -408,17 +438,35 @@ func (c *Core) GetModelDiagnostics(modelID string) ModelDiagnostics {
 		out.Error = "模型未安装"
 		return out
 	}
-	out.Warnings = append(out.Warnings, "ONNX 计算图解析（opset/算子/形状）将在 P4 提供")
+	out.Warnings = append(out.Warnings, "opset/算子列表未由原生层暴露（后续版本补充）；形状与倍率来自 ONNX 图元数据")
 	dir := filepath.Dir(path)
 	if st, err := os.Stat(path); err == nil {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("权重文件: %s (%.1f MB)", filepath.Base(path), float64(st.Size())/(1024*1024)))
 	}
+	// Native graph introspection: real shapes, dtype and contract warnings.
+	if insp, err := engine.InspectModel(path); err == nil {
+		for _, t := range insp.Inputs {
+			out.Inputs = append(out.Inputs, TensorShape{Name: t.Name, Dims: t.Dims, Dtype: t.Dtype})
+		}
+		for _, t := range insp.Outputs {
+			out.Outputs = append(out.Outputs, TensorShape{Name: t.Name, Dims: t.Dims, Dtype: t.Dtype})
+		}
+		out.Warnings = append(out.Warnings, insp.Warnings...)
+		if insp.Scale > 0 {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("从静态形状推导的倍率: x%d", insp.Scale))
+		}
+	} else {
+		out.Warnings = append(out.Warnings, "无法读取 ONNX 图元数据："+err.Error())
+	}
 	sidecarPath := filepath.Join(dir, "model.json")
 	if sc, err := models.ParseSidecar(sidecarPath); err == nil {
-		out.Opset = 0
-		out.Inputs = append(out.Inputs, TensorShape{Name: firstInputName(sc.Inputs), Dims: []int{-1, sc.Preprocess.Channels, -1, -1}, Dtype: sc.Constraints.DType})
-		for _, o := range sc.Outputs {
-			out.Outputs = append(out.Outputs, TensorShape{Name: o.Name, Dims: []int{-1, sc.Preprocess.Channels, -1, -1}, Dtype: sc.Constraints.DType})
+		if len(out.Inputs) == 0 {
+			out.Inputs = append(out.Inputs, TensorShape{Name: firstInputName(sc.Inputs), Dims: []int{-1, sc.Preprocess.Channels, -1, -1}, Dtype: sc.Constraints.DType})
+		}
+		if len(out.Outputs) == 0 {
+			for _, o := range sc.Outputs {
+				out.Outputs = append(out.Outputs, TensorShape{Name: o.Name, Dims: []int{-1, sc.Preprocess.Channels, -1, -1}, Dtype: sc.Constraints.DType})
+			}
 		}
 		out.Warnings = append(out.Warnings, fmt.Sprintf("sidecar: scale=%d crop=%d norm=%s tileAlign=%d fixedSize=%d", firstOutputScale(sc.Outputs), firstOutputCrop(sc.Outputs), sc.Preprocess.Norm, sc.Constraints.TileAlign, sc.Constraints.FixedSize))
 	} else {

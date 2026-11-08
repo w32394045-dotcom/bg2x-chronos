@@ -79,6 +79,18 @@ int chronos_ort_available(void);
  */
 int chronos_backend_probe(char* buf, int buf_len);
 
+/* --- model introspection (additive; ABI version stays 1) ------------------ */
+/*
+ * Reads an .onnx model's inputs/outputs (names, dtypes, shapes), derives the
+ * scale when the graph has static spatial dims, and returns a JSON report:
+ *   {"available":true,"scale":4,"inputs":[...],"outputs":[...],
+ *    "warnings":[...],"error":""}
+ * buf == NULL or buf_len <= 0 returns the required length; otherwise the bytes
+ * written. Negative return codes are ABI error codes (CHRONOS_ERR_MODEL when the
+ * model cannot be loaded, e.g. ONNX Runtime is not available).
+ */
+int chronos_model_inspect(const char* model_path, char* buf, int buf_len);
+
 /* --- session lifecycle --------------------------------------------------- */
 /*
  * model_path: empty/NULL => stub backend (high quality resample, no AI model).
