@@ -2,12 +2,312 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    color-scheme: dark;
-    --chronos-scroll: #2b3b4d;
-  }
+/* ============================================================================
+ * 主题色板（CSS 变量）
+ *
+ * 所有 `--c-*` 都是空格分隔的 RGB 三元组，tailwind.config.js 里通过
+ * `rgb(var(--c-*) / <alpha-value>)` 消费，因此 `/50` 之类的透明度修饰符照常工作。
+ * 运行时由 src/lib/theme.ts 把主题写到 <html data-theme="...">，并用
+ * color-scheme 同步浏览器原生控件（滚动条 / 表单 / 输入框）的明暗。
+ *
+ * :root 上的默认值 = dark：这样在 JS 执行前也不会闪一帧错误配色；
+ * 下面三块分别是 dark / light / claude 的完整取值，互不继承。
+ * ========================================================================= */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
 
+  /* ink：页面 / 面板 / 控件的层级底色 */
+  --c-ink-950: 6 9 13; /* #06090d */
+  --c-ink-900: 10 15 21; /* #0a0f15 */
+  --c-ink-850: 14 20 28; /* #0e141c */
+  --c-ink-800: 18 26 36; /* #121a24 */
+  --c-ink-750: 22 33 45; /* #16212d */
+  --c-ink-700: 27 40 54; /* #1b2836 */
+  --c-ink-600: 34 48 63; /* #22303f */
+  --c-ink-500: 43 59 77; /* #2b3b4d */
+
+  /* line：边框 */
+  --c-line: 34 48 63; /* #22303f */
+  --c-line-soft: 26 37 50; /* #1a2532 */
+  --c-line-strong: 49 70 92; /* #31465c */
+
+  /* mute：文字层级（strong = 正文） */
+  --c-mute: 139 155 176; /* #8b9bb0 */
+  --c-mute-soft: 107 124 146; /* #6b7c92 */
+  --c-mute-strong: 182 196 212; /* #b6c4d4 */
+
+  /* brand：青色主强调色 */
+  --c-brand-50: 233 255 250; /* #e9fffa */
+  --c-brand-200: 157 245 230; /* #9df5e6 */
+  --c-brand-300: 108 235 219; /* #6cebdb */
+  --c-brand-400: 63 222 208; /* #3fded0 */
+  --c-brand-500: 34 200 189; /* #22c8bd */
+  --c-brand-600: 18 165 160; /* #12a5a0 */
+  --c-brand-700: 13 127 128; /* #0d7f80 */
+  --c-brand-900: 8 59 65; /* #083b41 */
+
+  /* warn / danger / ok：语义色 */
+  --c-warn: 244 183 64; /* #f4b740 */
+  --c-warn-soft: 249 212 136; /* #f9d488 */
+  --c-warn-deep: 122 84 16; /* #7a5410 */
+  --c-danger: 244 103 107; /* #f4676b */
+  --c-danger-soft: 247 164 166; /* #f7a4a6 */
+  --c-danger-deep: 122 36 39; /* #7a2427 */
+  --c-ok: 74 222 128; /* #4ade80 */
+  --c-ok-soft: 142 240 174; /* #8ef0ae */
+  --c-ok-deep: 20 83 45; /* #14532d */
+
+  /* 语义叠加 / 最强文字 / 模态遮罩 / 品牌色上的文字 */
+  --c-overlay: 255 255 255; /* bg-overlay/5 等，深色下是白色叠加 */
+  --c-fg: 255 255 255; /* 原 text-white */
+  --c-scrim: 6 9 13; /* 原 bg-ink-950/70 的遮罩 */
+  --c-on-brand: 6 9 13; /* 原 btn-primary 的 text-ink-950 */
+
+  /* 状态色号：dark 保持 Tailwind 默认值（组件类名不变） */
+  --c-amber-200: 253 230 138; /* #fde68a */
+  --c-amber-300: 252 211 77; /* #fcd34d */
+  --c-amber-400: 251 191 36; /* #fbbf24 */
+  --c-amber-500: 245 158 11; /* #f59e0b */
+  --c-emerald-200: 167 243 208; /* #a7f3d0 */
+  --c-emerald-300: 110 231 183; /* #6ee7b7 */
+  --c-emerald-400: 52 211 153; /* #34d399 */
+  --c-emerald-500: 16 185 129; /* #10b981 */
+  --c-fuchsia-300: 240 171 252; /* #f0abfc */
+  --c-fuchsia-400: 232 121 249; /* #e879f9 */
+  --c-fuchsia-500: 217 70 239; /* #d946ef */
+  --c-rose-200: 254 205 211; /* #fecdd3 */
+  --c-rose-300: 253 164 175; /* #fda4af */
+  --c-rose-400: 251 113 133; /* #fb7185 */
+  --c-rose-500: 244 63 94; /* #f43f5e */
+  --c-sky-200: 186 230 253; /* #bae6fd */
+  --c-sky-300: 125 211 252; /* #7dd3fc */
+  --c-sky-400: 56 189 248; /* #38bdf8 */
+  --c-sky-500: 14 165 233; /* #0ea5e9 */
+
+  /* 页面背景的两团光晕（原 body 里的写死 rgba） */
+  --c-bg-glow-1: rgba(34, 200, 189, 0.09);
+  --c-bg-glow-2: rgba(56, 189, 248, 0.07);
+
+  /* 滚动条：webkit 用 thumb 变量，Firefox 用 scroll-firefox（保持原值） */
+  --c-scroll-thumb: #26374a;
+  --c-scroll-thumb-hover: #35506b;
+  --c-scroll-firefox: #2b3b4d;
+
+  /* 焦点环 / 文本选中 */
+  --c-focus-ring: rgba(108, 235, 219, 0.65);
+  --c-selection: rgba(34, 200, 189, 0.3);
+
+  /* range 滑块 */
+  --c-range-fill: #22c8bd;
+  --c-range-track: #1b2836;
+  --c-range-thumb: #e9fffa;
+  --c-range-thumb-border: #12a5a0;
+  --c-range-thumb-shadow: rgba(0, 0, 0, 0.6);
+
+  /* 品牌发光（CompareSlider 分割线 / shadow-compare） */
+  --c-brand-glow: rgba(108, 235, 219, 0.55);
+
+  /* 面板阴影：与改造前逐字节一致 */
+  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -18px rgba(0, 0, 0, 0.9);
+  --shadow-glow: 0 0 0 1px rgba(34, 200, 189, 0.35), 0 12px 32px -12px rgba(34, 200, 189, 0.25);
+
+  /* DropZone 顶部径向高光 */
+  --c-drop-glow: rgba(34, 200, 189, 0.12);
+}
+
+/*
+ * light：纯白 / 中性灰。面板纯白、页面近白，强调色仍是 teal，
+ * 但为了白色背景上的可读性整体压深（brand-500 = teal-800 作主按钮底色，
+ * brand-300/200 统一为 teal-700 供小字号强调文字使用）。
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --c-ink-950: 245 246 248; /* #f5f6f8 页面底色 */
+  --c-ink-900: 255 255 255; /* #ffffff header / 状态栏 */
+  --c-ink-850: 255 255 255; /* #ffffff 面板 */
+  --c-ink-800: 248 249 251; /* #f8f9fb */
+  --c-ink-750: 241 243 246; /* #f1f3f6 */
+  --c-ink-700: 233 236 240; /* #e9ecf0 进度条轨道 */
+  --c-ink-600: 223 227 232; /* #dfe3e8 */
+  --c-ink-500: 203 209 217; /* #cbd1d9 */
+
+  --c-line: 226 230 235; /* #e2e6eb */
+  --c-line-soft: 238 241 244; /* #eef1f4 */
+  --c-line-strong: 201 209 218; /* #c9d1da */
+
+  --c-mute: 75 85 99; /* #4b5563 */
+  --c-mute-soft: 107 114 128; /* #6b7280 */
+  --c-mute-strong: 31 41 55; /* #1f2937 正文 */
+
+  --c-brand-50: 240 253 250; /* #f0fdfa */
+  --c-brand-200: 15 118 110; /* #0f766e */
+  --c-brand-300: 15 118 110; /* #0f766e */
+  --c-brand-400: 15 118 110; /* #0f766e hover 仍保证白字对比 */
+  --c-brand-500: 17 94 89; /* #115e59 主按钮底色 */
+  --c-brand-600: 19 78 74; /* #134e4a */
+  --c-brand-700: 15 61 58; /* #0f3d3a */
+  --c-brand-900: 4 47 46; /* #042f2e */
+
+  --c-warn: 180 83 9; /* #b45309 */
+  --c-warn-soft: 245 158 11; /* #f59e0b */
+  --c-warn-deep: 120 53 15; /* #78350f */
+  --c-danger: 190 18 60; /* #be123c */
+  --c-danger-soft: 244 63 94; /* #f43f5e */
+  --c-danger-deep: 136 19 55; /* #881337 */
+  --c-ok: 4 120 87; /* #047857 */
+  --c-ok-soft: 16 185 129; /* #10b981 */
+  --c-ok-deep: 6 78 59; /* #064e3b */
+
+  --c-overlay: 15 23 42; /* 浅色主题的叠加层换成正片深色 */
+  --c-fg: 15 23 42; /* #0f172a */
+  --c-scrim: 15 23 42;
+  --c-on-brand: 255 255 255;
+
+  --c-amber-200: 146 64 14; /* #92400e */
+  --c-amber-300: 180 83 9; /* #b45309 */
+  --c-amber-400: 217 119 6; /* #d97706 */
+  --c-amber-500: 245 158 11; /* #f59e0b */
+  --c-emerald-200: 6 95 70; /* #065f46 */
+  --c-emerald-300: 4 120 87; /* #047857 */
+  --c-emerald-400: 5 150 105; /* #059669 */
+  --c-emerald-500: 16 185 129; /* #10b981 */
+  --c-fuchsia-300: 162 28 175; /* #a21caf */
+  --c-fuchsia-400: 192 38 211; /* #c026d3 */
+  --c-fuchsia-500: 217 70 239; /* #d946ef */
+  --c-rose-200: 159 18 57; /* #9f1239 */
+  --c-rose-300: 190 18 60; /* #be123c */
+  --c-rose-400: 225 29 72; /* #e11d48 */
+  --c-rose-500: 244 63 94; /* #f43f5e */
+  --c-sky-200: 7 89 133; /* #075985 */
+  --c-sky-300: 3 105 161; /* #0369a1 */
+  --c-sky-400: 2 132 199; /* #0284c7 */
+  --c-sky-500: 14 165 233; /* #0ea5e9 */
+
+  --c-bg-glow-1: rgba(13, 148, 136, 0.06);
+  --c-bg-glow-2: rgba(56, 189, 248, 0.05);
+
+  --c-scroll-thumb: #c4cbd4;
+  --c-scroll-thumb-hover: #a7b0bc;
+  --c-scroll-firefox: #c4cbd4;
+
+  --c-focus-ring: rgba(13, 148, 136, 0.65);
+  --c-selection: rgba(13, 148, 136, 0.2);
+
+  --c-range-fill: #0f766e;
+  --c-range-track: #e3e8ec;
+  --c-range-thumb: #ffffff;
+  --c-range-thumb-border: #0f766e;
+  --c-range-thumb-shadow: rgba(15, 23, 42, 0.2);
+
+  --c-brand-glow: rgba(15, 118, 110, 0.4);
+
+  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.7) inset, 0 10px 30px -20px rgba(15, 23, 42, 0.25);
+  --shadow-glow: 0 0 0 1px rgba(15, 118, 110, 0.3), 0 10px 28px -14px rgba(15, 118, 110, 0.22);
+
+  --c-drop-glow: rgba(13, 148, 136, 0.08);
+}
+
+/*
+ * claude：暖纸主题。最终色板（与需求文档一致）：
+ *   页面底色 #FAF9F5 · 面板 #FFFFFF · 边框 #E8E4DC
+ *   正文 #3D3A34 · 次要文字 #6B655C · 暖强调色 #C96442
+ * 说明：
+ * - 强调色 #C96442 用作 brand-400（ring / border / hover 等强调层），
+ *   主按钮底色用稍深的 brand-500 #B4553A，以保证近白文字的对比度；
+ * - 文字型强调（brand-200/300）压深到 #8E3F27 / #A34C33，白色面板上可读；
+ * - 状态色（amber/emerald/rose/sky/fuchsia）沿用 light 的深色号，只做中性化处理。
+ */
+:root[data-theme='claude'] {
+  color-scheme: light;
+
+  --c-ink-950: 250 249 245; /* #faf9f5 页面底色 */
+  --c-ink-900: 255 255 255; /* #ffffff */
+  --c-ink-850: 255 255 255; /* #ffffff 面板 */
+  --c-ink-800: 248 245 238; /* #f8f5ee */
+  --c-ink-750: 243 239 230; /* #f3efe6 */
+  --c-ink-700: 236 231 220; /* #ece7dc */
+  --c-ink-600: 227 220 208; /* #e3dcd0 */
+  --c-ink-500: 214 206 192; /* #d6cec0 */
+
+  --c-line: 232 228 220; /* #e8e4dc */
+  --c-line-soft: 241 237 229; /* #f1ede5 */
+  --c-line-strong: 214 206 192; /* #d6cec0 */
+
+  --c-mute: 107 101 92; /* #6b655c 次要文字 */
+  --c-mute-soft: 138 130 119; /* #8a8277 三级文字 */
+  --c-mute-strong: 61 58 52; /* #3d3a34 正文 */
+
+  --c-brand-50: 253 243 238; /* #fdf3ee */
+  --c-brand-200: 142 63 39; /* #8e3f27 */
+  --c-brand-300: 163 76 51; /* #a34c33 */
+  --c-brand-400: 201 100 66; /* #c96442 暖强调色 */
+  --c-brand-500: 180 85 58; /* #b4553a 主按钮底色 */
+  --c-brand-600: 154 70 48; /* #9a4630 */
+  --c-brand-700: 124 58 36; /* #7c3a24 */
+  --c-brand-900: 59 27 18; /* #3b1b12 */
+
+  --c-warn: 180 83 9; /* #b45309 */
+  --c-warn-soft: 245 158 11; /* #f59e0b */
+  --c-warn-deep: 120 53 15; /* #78350f */
+  --c-danger: 190 18 60; /* #be123c */
+  --c-danger-soft: 244 63 94; /* #f43f5e */
+  --c-danger-deep: 136 19 55; /* #881337 */
+  --c-ok: 4 120 87; /* #047857 */
+  --c-ok-soft: 16 185 129; /* #10b981 */
+  --c-ok-deep: 6 78 59; /* #064e3b */
+
+  --c-overlay: 61 58 52; /* 暖灰叠加 */
+  --c-fg: 42 39 35; /* #2a2723 */
+  --c-scrim: 61 58 52;
+  --c-on-brand: 255 255 255;
+
+  --c-amber-200: 146 64 14; /* #92400e */
+  --c-amber-300: 180 83 9; /* #b45309 */
+  --c-amber-400: 217 119 6; /* #d97706 */
+  --c-amber-500: 245 158 11; /* #f59e0b */
+  --c-emerald-200: 6 95 70; /* #065f46 */
+  --c-emerald-300: 4 120 87; /* #047857 */
+  --c-emerald-400: 5 150 105; /* #059669 */
+  --c-emerald-500: 16 185 129; /* #10b981 */
+  --c-fuchsia-300: 162 28 175; /* #a21caf */
+  --c-fuchsia-400: 192 38 211; /* #c026d3 */
+  --c-fuchsia-500: 217 70 239; /* #d946ef */
+  --c-rose-200: 159 18 57; /* #9f1239 */
+  --c-rose-300: 190 18 60; /* #be123c */
+  --c-rose-400: 225 29 72; /* #e11d48 */
+  --c-rose-500: 244 63 94; /* #f43f5e */
+  --c-sky-200: 7 89 133; /* #075985 */
+  --c-sky-300: 3 105 161; /* #0369a1 */
+  --c-sky-400: 2 132 199; /* #0284c7 */
+  --c-sky-500: 14 165 233; /* #0ea5e9 */
+
+  --c-bg-glow-1: rgba(201, 100, 66, 0.06);
+  --c-bg-glow-2: rgba(244, 183, 64, 0.05);
+
+  --c-scroll-thumb: #d8d0c2;
+  --c-scroll-thumb-hover: #c4baab;
+  --c-scroll-firefox: #d8d0c2;
+
+  --c-focus-ring: rgba(201, 100, 66, 0.55);
+  --c-selection: rgba(201, 100, 66, 0.2);
+
+  --c-range-fill: #b4553a;
+  --c-range-track: #ece7dc;
+  --c-range-thumb: #ffffff;
+  --c-range-thumb-border: #b4553a;
+  --c-range-thumb-shadow: rgba(61, 58, 52, 0.2);
+
+  --c-brand-glow: rgba(201, 100, 66, 0.45);
+
+  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.8) inset, 0 10px 28px -18px rgba(61, 58, 52, 0.28);
+  --shadow-glow: 0 0 0 1px rgba(201, 100, 66, 0.32), 0 10px 28px -14px rgba(201, 100, 66, 0.22);
+
+  --c-drop-glow: rgba(201, 100, 66, 0.08);
+}
+
+@layer base {
   html,
   body,
   #app {
@@ -17,15 +317,15 @@
   body {
     @apply bg-ink-950 font-sans text-[13px] leading-relaxed text-mute-strong antialiased;
     background-image:
-      radial-gradient(1100px 520px at 12% -8%, rgba(34, 200, 189, 0.09), transparent 60%),
-      radial-gradient(900px 480px at 92% 0%, rgba(56, 189, 248, 0.07), transparent 62%);
+      radial-gradient(1100px 520px at 12% -8%, var(--c-bg-glow-1), transparent 60%),
+      radial-gradient(900px 480px at 92% 0%, var(--c-bg-glow-2), transparent 62%);
     background-attachment: fixed;
     overflow: hidden;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--chronos-scroll) transparent;
+    scrollbar-color: var(--c-scroll-firefox) transparent;
   }
 
   ::-webkit-scrollbar {
@@ -38,24 +338,24 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #26374a;
+    background: var(--c-scroll-thumb);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #35506b;
+    background: var(--c-scroll-thumb-hover);
     background-clip: padding-box;
   }
 
   :focus-visible {
-    outline: 2px solid rgba(108, 235, 219, 0.65);
+    outline: 2px solid var(--c-focus-ring);
     outline-offset: 2px;
   }
 
   ::selection {
-    background: rgba(34, 200, 189, 0.3);
+    background: var(--c-selection);
   }
 }
 
@@ -82,11 +382,11 @@
   }
 
   .btn-primary {
-    @apply btn bg-brand-500 text-ink-950 shadow-glow hover:bg-brand-400 active:bg-brand-600;
+    @apply btn bg-brand-500 text-on-brand shadow-glow hover:bg-brand-400 active:bg-brand-600;
   }
 
   .btn-ghost {
-    @apply btn border-line text-mute-strong hover:border-line-strong hover:bg-white/[0.04] hover:text-white;
+    @apply btn border-line text-mute-strong hover:border-line-strong hover:bg-overlay/[0.04] hover:text-fg;
   }
 
   .btn-danger {
@@ -95,7 +395,7 @@
 
   .icon-btn {
     @apply inline-flex h-7 w-7 items-center justify-center rounded-md text-mute transition-colors
-      hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
+      hover:bg-overlay/[0.06] hover:text-fg disabled:cursor-not-allowed disabled:opacity-40;
   }
 
   .chip {
@@ -141,7 +441,7 @@
   }
 }
 
-/* 自定义 range：Tailwind 无法直接美化 range thumb，用原生 CSS 变量配色 */
+/* 自定义 range：Tailwind 无法直接美化 range thumb，用主题变量配色 */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -155,10 +455,10 @@ input[type='range']::-webkit-slider-runnable-track {
   border-radius: 999px;
   background: linear-gradient(
     to right,
-    #22c8bd 0%,
-    #22c8bd var(--range-progress, 50%),
-    #1b2836 var(--range-progress, 50%),
-    #1b2836 100%
+    var(--c-range-fill) 0%,
+    var(--c-range-fill) var(--range-progress, 50%),
+    var(--c-range-track) var(--range-progress, 50%),
+    var(--c-range-track) 100%
   );
 }
 
@@ -169,9 +469,9 @@ input[type='range']::-webkit-slider-thumb {
   height: 14px;
   width: 14px;
   border-radius: 999px;
-  background: #e9fffa;
-  border: 2px solid #12a5a0;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  background: var(--c-range-thumb);
+  border: 2px solid var(--c-range-thumb-border);
+  box-shadow: 0 1px 6px var(--c-range-thumb-shadow);
 }
 
 input[type='range']:disabled {

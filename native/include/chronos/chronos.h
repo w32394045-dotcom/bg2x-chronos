@@ -33,6 +33,9 @@ extern "C" {
 #define CHRONOS_BACKEND_NONE 0
 #define CHRONOS_BACKEND_STUB 1
 #define CHRONOS_BACKEND_OPENVINO 2
+/* ONNX Runtime backend: built in, runtime loaded dynamically (may be absent at
+ * runtime; query chronos_backend_available(CHRONOS_BACKEND_ORT)). */
+#define CHRONOS_BACKEND_ORT 3
 
 /* Flags */
 #define CHRONOS_FLAG_NONE 0
@@ -60,11 +63,29 @@ int chronos_backend_available(int backend);
 /* Thread-local last error message (never NULL, empty string when no error). */
 const char* chronos_last_error(void);
 
+/* --- runtime capability probe (additive; ABI version stays 1) ------------ */
+/* 1 when the ONNX Runtime shared library can be loaded, 0 otherwise. This is
+ * the runtime probe behind chronos_backend_available(CHRONOS_BACKEND_ORT). */
+int chronos_ort_available(void);
+
+/*
+ * Writes a JSON capability report: CPU count, ort{available,version,providers},
+ * openvino{available}, sidecarFound, tileAlign, fixedSize, scale, warnings.
+ * The model specific fields carry the defaults here because the probe has no
+ * model path (a later extension adds model context).
+ * With buf == NULL or buf_len <= 0 the required length is returned. Otherwise
+ * the JSON is copied, NUL terminated and truncated to buf_len - 1; the number of
+ * bytes written is returned. Negative return codes are ABI error codes.
+ */
+int chronos_backend_probe(char* buf, int buf_len);
+
 /* --- session lifecycle --------------------------------------------------- */
 /*
  * model_path: empty/NULL => stub backend (high quality resample, no AI model).
- *             otherwise tries OpenVINO IR (.xml) or ONNX (.onnx) when built with
- *             CHRONOS_WITH_OPENVINO; returns NULL on failure.
+ *             otherwise the ONNX Runtime backend is tried first (the runtime is
+ *             loaded dynamically, so this works in every build once the library
+ *             is present), then the OpenVINO backend when built with
+ *             CHRONOS_WITH_OPENVINO; returns NULL on failure with err set.
  * scale:      model native scale, or desired output scale for the stub backend.
  * options:    NULL => defaults.
  * err/err_len: optional caller buffer for a human readable message.
@@ -76,7 +97,7 @@ void chronos_session_free(chronos_session* session);
 
 int chronos_session_backend(const chronos_session* session);
 int chronos_session_scale(const chronos_session* session);
-/* Writes e.g. "openvino/GPU" or "stub/Lanczos3"; returns length, or negative code. */
+/* Writes e.g. "ort/CPU", "openvino/GPU" or "stub/Lanczos3"; returns length, or negative code. */
 int chronos_session_describe(const chronos_session* session, char* buf, int buf_len);
 
 /* --- per-image execution ------------------------------------------------- */

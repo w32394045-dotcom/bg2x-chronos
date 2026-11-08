@@ -35,7 +35,7 @@ function open(path: string, source: string): void {
       <div class="panel-title">
         <Icon name="grid" :size="14" class="text-mute" />
         最近结果
-        <span class="chip bg-white/5 text-mute-soft ring-white/10">{{ recent.length }}</span>
+        <span class="chip bg-overlay/5 text-mute-soft ring-overlay/10">{{ recent.length }}</span>
       </div>
       <span class="text-[10.5px] text-mute-soft">点击缩略图打开对比</span>
     </div>

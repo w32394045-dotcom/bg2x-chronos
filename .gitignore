@@ -1,6 +1,8 @@
-﻿# --- native -----------------------------------------------------------------
+# --- native -----------------------------------------------------------------
 native/build*/
 build/bin/
+build/dist/
+build/cjktest/
 native/out/
 *.o
 *.obj
@@ -11,6 +13,9 @@ native/out/
 *.a
 *.exp
 *.pdb
+# vendored ORT runtime binaries stay out of git (the C API header is checked in)
+native/third_party/onnxruntime/runtime*/
+*.part
 
 # --- go ---------------------------------------------------------------------
 /chronos
@@ -41,6 +46,8 @@ libs/*.so
 .DS_Store
 Thumbs.db
 *.log
+# native test fixtures written into the CWD when a test binary is run manually
+chronos_test_*
 .tools/
 
 # --- local/tool artifacts ---

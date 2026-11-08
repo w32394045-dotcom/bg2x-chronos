@@ -13,12 +13,15 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "chronos/backend.h"
 #include "chronos/image.h"
 #include "chronos/options.h"
 #include "chronos/pipeline.h"
 #include "common.h"
+#include "ort_loader.h"
 
 #ifndef CHRONOS_NATIVE_VERSION
 #define CHRONOS_NATIVE_VERSION "1.0.0"
@@ -82,6 +85,121 @@ chronos::Options options_from_c(const chronos_options* options, std::string* err
 
 }  // namespace
 
+/* Escapes a string for the JSON capability report (values are short and
+ * normally ASCII; control characters are replaced to keep the JSON valid). */
+namespace {
+
+std::string json_escape(const std::string& value) {
+  std::string escaped;
+  escaped.reserve(value.size() + 8);
+  for (char c : value) {
+    switch (c) {
+      case '"':
+        escaped += "\\\"";
+        break;
+      case '\\':
+        escaped += "\\\\";
+        break;
+      case '\n':
+        escaped += "\\n";
+        break;
+      case '\r':
+        escaped += "\\r";
+        break;
+      case '\t':
+        escaped += "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          escaped += '?';
+        } else {
+          escaped += c;
+        }
+        break;
+    }
+  }
+  return escaped;
+}
+
+bool provider_listed(const std::string& providers, const char* name) {
+  if (name == nullptr) return false;
+  size_t start = 0;
+  while (start <= providers.size()) {
+    const size_t comma = providers.find(',', start);
+    const std::string token = providers.substr(
+        start, comma == std::string::npos ? std::string::npos : comma - start);
+    if (token == name) return true;
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return false;
+}
+
+/* JSON capability report (see PLAN-v0.3.md section 5). Model specific fields
+ * are defaults because this probe has no model path. */
+std::string build_backend_probe_json() {
+  const bool ort_ready = chronos::ort_available();
+  const std::string ort_version = ort_ready ? chronos::ort_version_string() : std::string();
+  const std::string providers = ort_ready ? chronos::ort_providers() : std::string();
+
+  std::vector<std::string> provider_list;
+  size_t start = 0;
+  while (start < providers.size()) {
+    const size_t comma = providers.find(',', start);
+    const std::string token = providers.substr(
+        start, comma == std::string::npos ? std::string::npos : comma - start);
+    if (!token.empty()) provider_list.push_back(token);
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+
+  unsigned cpu_count = std::thread::hardware_concurrency();
+  if (cpu_count == 0) cpu_count = 1;
+
+  std::string json = "{\"cpus\":";
+  json += std::to_string(cpu_count);
+  json += ",\"ort\":{\"available\":";
+  json += ort_ready ? "true" : "false";
+  json += ",\"version\":\"";
+  json += json_escape(ort_version);
+  json += "\",\"providers\":[";
+  for (size_t i = 0; i < provider_list.size(); ++i) {
+    if (i != 0) json += ",";
+    json += "\"";
+    json += json_escape(provider_list[i]);
+    json += "\"";
+  }
+  json += "]},\"openvino\":{\"available\":";
+  json += chronos::openvino_available() ? "true" : "false";
+  json += "},\"sidecarFound\":false,\"tileAlign\":1,\"fixedSize\":0,\"scale\":0,\"warnings\":[";
+
+  std::vector<std::string> warnings;
+  if (!ort_ready) {
+    warnings.push_back(
+        "ONNX Runtime runtime not found (set CHRONOS_ORT_DIR to the directory containing "
+        "onnxruntime.dll)");
+  } else {
+    const bool gpu_provider = provider_listed(providers, "DML") ||
+                              provider_listed(providers, "CUDA") ||
+                              provider_listed(providers, "TensorRT") ||
+                              provider_listed(providers, "ROCM") ||
+                              provider_listed(providers, "MIGraphX");
+    if (!gpu_provider) {
+      warnings.push_back("the loaded ONNX Runtime has no GPU execution provider (CPU only)");
+    }
+  }
+  for (size_t i = 0; i < warnings.size(); ++i) {
+    if (i != 0) json += ",";
+    json += "\"";
+    json += json_escape(warnings[i]);
+    json += "\"";
+  }
+  json += "]}";
+  return json;
+}
+
+}  // namespace
+
 extern "C" {
 
 int chronos_abi_version(void) { return CHRONOS_ABI_VERSION; }
@@ -100,6 +218,8 @@ const char* chronos_backend_name(int backend) {
         return "stub";
       case CHRONOS_BACKEND_OPENVINO:
         return "openvino";
+      case CHRONOS_BACKEND_ORT:
+        return "ort";
       default:
         set_last_error("unknown backend id passed to chronos_backend_name");
         return "unknown";
@@ -116,6 +236,9 @@ int chronos_backend_available(int backend) {
         return 1;
       case CHRONOS_BACKEND_OPENVINO:
         return chronos::openvino_available() ? 1 : 0;
+      case CHRONOS_BACKEND_ORT:
+        /* Runtime check: the ONNX Runtime shared library must be loadable. */
+        return chronos::ort_available() ? 1 : 0;
       case CHRONOS_BACKEND_NONE:
       default:
         return 0;
@@ -123,6 +246,33 @@ int chronos_backend_available(int backend) {
   } catch (...) {
     set_last_error("chronos_backend_available: unexpected error");
     return 0;
+  }
+}
+
+int chronos_ort_available(void) {
+  try {
+    return chronos::ort_available() ? 1 : 0;
+  } catch (...) {
+    set_last_error("chronos_ort_available: unexpected error");
+    return 0;
+  }
+}
+
+int chronos_backend_probe(char* buf, int buf_len) {
+  try {
+    const std::string json = build_backend_probe_json();
+    if (buf == nullptr || buf_len <= 0) return static_cast<int>(json.size());
+    const size_t capacity = static_cast<size_t>(buf_len);
+    const size_t count = json.size() < capacity - 1 ? json.size() : capacity - 1;
+    std::memcpy(buf, json.data(), count);
+    buf[count] = '\0';
+    return static_cast<int>(count);
+  } catch (const std::bad_alloc&) {
+    set_last_error("out of memory in chronos_backend_probe");
+    return CHRONOS_ERR_UNKNOWN;
+  } catch (...) {
+    set_last_error("unexpected error in chronos_backend_probe");
+    return CHRONOS_ERR_UNKNOWN;
   }
 }
 

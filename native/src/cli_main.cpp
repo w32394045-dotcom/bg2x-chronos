@@ -123,7 +123,8 @@ void print_usage() {
       "\n"
       "  --in <path>        input image (png/jpg/bmp)\n"
       "  --out <path>       output image; format chosen by extension\n"
-      "  --model <path>     OpenVINO IR (.xml) or ONNX (.onnx); omit for stub\n"
+      "  --model <path>     ONNX model (.onnx, loaded via the dynamic ONNX Runtime\n"
+      "                     backend) or OpenVINO IR (.xml); omit for stub\n"
       "  --scale <n>        output scale, default 4 (stub supports 1..4)\n"
       "  --tile <n>         tile size, default 256\n"
       "  --overlap <n>      tile overlap, default 16\n"
@@ -202,10 +203,11 @@ bool parse_args(const std::vector<std::string>& argv, CliArgs* args, std::string
 void print_info() {
   std::printf(
       "{\"event\":\"info\",\"abi\":%d,\"version\":\"%s\",\"backends\":{\"stub\":%s,"
-      "\"openvino\":%s}}\n",
+      "\"openvino\":%s,\"ort\":%s}}\n",
       chronos_abi_version(), json_escape(chronos_version_string()).c_str(),
       chronos_backend_available(CHRONOS_BACKEND_STUB) ? "true" : "false",
-      chronos_backend_available(CHRONOS_BACKEND_OPENVINO) ? "true" : "false");
+      chronos_backend_available(CHRONOS_BACKEND_OPENVINO) ? "true" : "false",
+      chronos_backend_available(CHRONOS_BACKEND_ORT) ? "true" : "false");
 }
 
 }  // namespace

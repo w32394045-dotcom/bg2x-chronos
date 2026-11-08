@@ -54,7 +54,7 @@ function progressOf(item: QueueItem): number {
       <div class="panel-title">
         <Icon name="layers" :size="14" class="text-mute" />
         处理队列
-        <span class="chip bg-white/5 text-mute-soft ring-white/10">{{ queueSummary.total }}</span>
+        <span class="chip bg-overlay/5 text-mute-soft ring-overlay/10">{{ queueSummary.total }}</span>
         <span v-if="queueSummary.running > 0" class="chip bg-brand-500/10 text-brand-300 ring-brand-400/30">
           <span class="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-brand-300" />
           {{ queueSummary.running }} 处理中
@@ -94,7 +94,7 @@ function progressOf(item: QueueItem): number {
       <li
         v-for="item in items"
         :key="item.id"
-        class="group flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-white/[0.025]"
+        class="group flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-overlay/[0.025]"
         :class="item.status === 'running' ? 'bg-brand-500/[0.04]' : ''"
       >
         <div class="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border border-line bg-ink-900">
@@ -132,7 +132,7 @@ function progressOf(item: QueueItem): number {
               />
               {{ STATUS_LABEL[item.status] }}
             </span>
-            <span v-if="item.backend && item.status === 'done'" class="chip shrink-0 bg-white/5 text-mute-soft ring-white/10 font-mono">
+            <span v-if="item.backend && item.status === 'done'" class="chip shrink-0 bg-overlay/5 text-mute-soft ring-overlay/10 font-mono">
               {{ item.backend }}
             </span>
           </div>

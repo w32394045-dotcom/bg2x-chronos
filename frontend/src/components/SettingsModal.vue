@@ -3,11 +3,28 @@ import { computed } from 'vue'
 import Icon from './Icon.vue'
 import type { ChronosStore } from '@/composables/useChronos'
 import { backendLabel } from '@/lib/labels'
+import { THEME_DESC, THEME_LABEL, THEMES, activeTheme, setTheme } from '@/lib/theme'
+import {
+  ZOOM_MAX,
+  ZOOM_MIN,
+  activeZoom,
+  decreaseZoom,
+  getZoomShortcutHint,
+  increaseZoom,
+  resetZoom,
+} from '@/lib/zoom'
 
 const props = defineProps<{ store: ChronosStore }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 
 const { appInfo, models, loadModels, openDataDir, previewMode, modeInfo, browseSupported, maxConcurrency } = props.store
+
+const zoomPercent = computed(() => Math.round(activeZoom.value * 100))
+const zoomRangeText = `${Math.round(ZOOM_MIN * 100)}–${Math.round(ZOOM_MAX * 100)}%`
+const shortcutHint = computed(() => getZoomShortcutHint(modeInfo.value.transport))
+// 显式包一层 computed：模板里不依赖“导入的 ref 自动解包”这一隐式行为
+const currentTheme = computed(() => activeTheme.value)
+const zoomValue = computed(() => activeZoom.value)
 
 const engine = computed(() => appInfo.value?.engine ?? null)
 const rows = computed(() => [
@@ -30,7 +47,7 @@ function pathRow(label: string, value: string | undefined): { label: string; val
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/70 p-4 backdrop-blur-sm" @click.self="emit('close')">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-scrim/70 p-4 backdrop-blur-sm" @click.self="emit('close')">
     <div class="w-full max-w-[560px] overflow-hidden rounded-xl border border-line bg-ink-850 shadow-2xl">
       <div class="flex items-center gap-2 border-b border-line-soft px-4 py-2.5">
         <Icon name="settings" :size="15" class="text-mute" />
@@ -43,7 +60,71 @@ function pathRow(label: string, value: string | undefined): { label: string; val
       </div>
 
       <div class="max-h-[70vh] overflow-y-auto px-4 py-3">
-        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-mute-soft">版本信息</h3>
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-mute-soft">外观 / 界面缩放</h3>
+        <div class="mt-1.5 rounded-lg border border-line-soft bg-ink-900/50 p-2.5">
+          <div class="grid grid-cols-3 gap-1.5">
+            <button
+              v-for="theme in THEMES"
+              :key="theme"
+              type="button"
+              class="rounded-md border px-2 py-1.5 text-[11.5px] transition-colors"
+              :class="
+                currentTheme === theme
+                  ? 'border-brand-500/60 bg-brand-500/10 text-brand-200'
+                  : 'border-line bg-ink-900/50 text-mute hover:border-line-strong'
+              "
+              :data-testid="`theme-option-${theme}`"
+              :aria-pressed="currentTheme === theme"
+              :title="THEME_DESC[theme]"
+              @click="setTheme(theme)"
+            >
+              {{ THEME_LABEL[theme] }}
+            </button>
+          </div>
+          <p class="mt-1 text-[10px] leading-relaxed text-mute-soft">{{ THEME_DESC[currentTheme] }}</p>
+
+          <div class="mt-2.5 flex items-center gap-2 border-t border-line-soft pt-2">
+            <span class="text-[11.5px] text-mute">缩放</span>
+            <button
+              type="button"
+              class="icon-btn !h-6 !w-6 border border-line"
+              aria-label="缩小界面"
+              title="缩小一档（-）"
+              :disabled="zoomValue <= ZOOM_MIN"
+              @click="decreaseZoom()"
+            >
+              <Icon name="minus" :size="12" />
+            </button>
+            <span class="min-w-[48px] text-center font-mono text-[11.5px] text-mute-strong" data-testid="zoom-value">
+              {{ zoomPercent }}%
+            </span>
+            <button
+              type="button"
+              class="icon-btn !h-6 !w-6 border border-line"
+              aria-label="放大界面"
+              title="放大一档（+）"
+              :disabled="zoomValue >= ZOOM_MAX"
+              @click="increaseZoom()"
+            >
+              <Icon name="plus" :size="12" />
+            </button>
+            <button
+              type="button"
+              class="btn-ghost !px-2 !py-0.5 text-[10.5px]"
+              :disabled="zoomValue === 1"
+              title="重置为 100%"
+              @click="resetZoom()"
+            >
+              重置
+            </button>
+            <span class="ml-auto font-mono text-[10px] text-mute-soft">{{ zoomRangeText }}</span>
+          </div>
+          <p class="mt-1 text-[10px] leading-relaxed text-mute-soft">
+            快捷键：{{ shortcutHint }}。输入框内不触发；浏览器模式下 Ctrl +/- 可能被浏览器页面缩放占用，故提供 Shift 变体，被占用时请用上方按钮。
+          </p>
+        </div>
+
+        <h3 class="mt-4 text-[11px] font-semibold uppercase tracking-wider text-mute-soft">版本信息</h3>
         <dl class="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[11.5px]">
           <div v-for="row in rows" :key="row.label" class="flex items-baseline justify-between gap-2 border-b border-line-soft/60 py-0.5">
             <dt class="shrink-0 text-mute-soft">{{ row.label }}</dt>
@@ -55,8 +136,8 @@ function pathRow(label: string, value: string | undefined): { label: string; val
         <div class="mt-1.5 rounded-lg border border-line-soft bg-ink-900/50 p-2.5 text-[11.5px]">
           <div class="flex items-center gap-2">
             <span class="chip bg-brand-500/10 text-brand-300 ring-brand-400/30">{{ backendLabel(engine?.backend || '') }}</span>
-            <span class="chip bg-white/5 text-mute ring-white/10">{{ engine?.device || 'n/a' }}</span>
-            <span class="chip bg-white/5 font-mono text-mute-soft ring-white/10">ABI {{ engine?.abiVersion ?? '—' }}</span>
+            <span class="chip bg-overlay/5 text-mute ring-overlay/10">{{ engine?.device || 'n/a' }}</span>
+            <span class="chip bg-overlay/5 font-mono text-mute-soft ring-overlay/10">ABI {{ engine?.abiVersion ?? '—' }}</span>
           </div>
           <p class="mt-1.5 text-[11px] text-mute-soft">{{ engine?.detail || '无引擎详情' }}</p>
         </div>

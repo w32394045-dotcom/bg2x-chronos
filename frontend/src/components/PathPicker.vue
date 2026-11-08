@@ -174,7 +174,7 @@ onMounted(() => {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/75 p-4 backdrop-blur-sm"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-scrim/75 p-4 backdrop-blur-sm"
     @click.self="emit('close')"
   >
     <div
@@ -189,7 +189,7 @@ onMounted(() => {
       <div class="flex items-center gap-2 border-b border-line-soft px-4 py-2.5">
         <Icon :name="isOutputMode ? 'folder' : 'image'" :size="15" class="text-brand-300" />
         <span class="text-[13px] font-medium text-mute-strong">{{ title }}</span>
-        <span class="chip bg-white/5 text-mute-soft ring-white/10">服务端浏览 · ListDirectory</span>
+        <span class="chip bg-overlay/5 text-mute-soft ring-overlay/10">服务端浏览 · ListDirectory</span>
         <button
           type="button"
           class="icon-btn ml-auto"
@@ -267,7 +267,7 @@ onMounted(() => {
             <button
               v-if="entry.isDir"
               type="button"
-              class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+              class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-overlay/[0.05]"
               :title="entry.path"
               @click="navigate(entry)"
             >
@@ -284,7 +284,7 @@ onMounted(() => {
                 entry.isImage
                   ? selected.includes(entry.path)
                     ? 'bg-brand-500/10'
-                    : 'hover:bg-white/[0.05]'
+                    : 'hover:bg-overlay/[0.05]'
                   : 'cursor-not-allowed opacity-45'
               "
               :disabled="!entry.isImage"

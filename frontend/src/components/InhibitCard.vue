@@ -97,7 +97,7 @@ onUnmounted(() => {
           :class="
             active
               ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-400/25'
-              : 'bg-white/5 text-mute-soft ring-white/10'
+              : 'bg-overlay/5 text-mute-soft ring-overlay/10'
           "
         >
           <span

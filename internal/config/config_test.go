@@ -61,3 +61,53 @@ func TestOutOfRangeValuesAreClamped(t *testing.T) {
 		t.Fatalf("clamped = %+v", s)
 	}
 }
+
+func TestUIPreferencesDefaultsAndClamping(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Theme != ThemeDark || s.UIScale != 1.0 || s.AccelMode != AccelAuto {
+		t.Fatalf("ui defaults = %+v", s)
+	}
+
+	// Legacy settings.json without the v0.3 fields must keep working.
+	legacy := `{"concurrency":4,"scale":4,"tileSize":256,"overlap":16}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Theme != ThemeDark || s.UIScale != 1.0 || s.AccelMode != AccelAuto {
+		t.Fatalf("legacy load = %+v", s)
+	}
+
+	raw := `{"theme":"neon","uiScale":9.5,"accelMode":"turbo"}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Theme != ThemeDark || s.UIScale != MaxUIScale || s.AccelMode != AccelAuto {
+		t.Fatalf("clamped ui = %+v", s)
+	}
+
+	s.Theme = ThemeClaude
+	s.UIScale = 0.3
+	s.AccelMode = AccelCPU
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != ThemeClaude || got.UIScale != MinUIScale || got.AccelMode != AccelCPU {
+		t.Fatalf("round trip = %+v", got)
+	}
+}

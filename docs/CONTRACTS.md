@@ -1,8 +1,9 @@
-# Project Chronos — 跨语言接口契约 (v2)
+# Project Chronos — 跨语言接口契约 (v3)
 
 > **状态：冻结。** 本文件是前端 / Go / C++ 三层之间唯一的接口事实来源。
 > 改动任何签名前必须同步更新本文件与三个实现，并通知 Lead。
 > 代码仓库：`w32394045-dotcom/bg2x-chronos`
+> v3 只做**增量**：既有签名与语义不变，新增内容见 §8。
 
 ## 0. 分层与数据流
 
@@ -16,10 +17,11 @@ Vue 3 UI ──Wails bindings (JSON)──▶ Go 调度层 ──CGO (chronos.h)
 
 1. **跨语言只传文件路径**，绝不传像素 buffer。图像读写在 C++ 内部完成。
 2. C++ 任何异常都不得越过 `extern "C"` 边界；每个入口 `try/catch(...)`。
-3. C++ 不依赖 OpenCV（ADR-001）：图像 IO 用 vendored `stb_image`，推理张量用 OpenVINO 原生 `ov::Tensor`。
+3. C++ 不依赖 OpenCV（ADR-001）：图像 IO 用 vendored `stb_image`，推理张量由所选运行时（ORT/OpenVINO）持有。
 4. C++ 侧 `chronos_session` 非线程安全；**每个 Go worker 独占一个 session**。
 5. 并发上限硬编码 8（配置层 + UI 双重约束）。
 6. 浏览器模式（§7）复用**同一份** `internal/uiapp.Core`，不允许出现两套业务逻辑。
+7. 推理运行时的加载是**运行时**行为（ADR-003）：C++ 用动态加载解析 ONNX Runtime，构建期不得依赖 ORT 的链接库。
 
 ## 1. C++ ⇄ Go：`native/include/chronos/chronos.h`
 
@@ -28,7 +30,7 @@ Vue 3 UI ──Wails bindings (JSON)──▶ Go 调度层 ──CGO (chronos.h)
 | API | 语义 |
 | --- | --- |
 | `chronos_abi_version()` | 返回 `CHRONOS_ABI_VERSION`(1)，Go 启动自检 |
-| `chronos_session_create(model_path, scale, opts, err, err_len)` | `model_path` 为空 ⇒ stub（Lanczos）后端；非空且编译了 OpenVINO ⇒ 尝试加载 `.xml`/`.onnx`，失败返回 `NULL` 并写 err |
+| `chronos_session_create(model_path, scale, opts, err, err_len)` | `model_path` 为空 ⇒ stub（Lanczos）后端；非空 ⇒ 依次尝试 ORT（动态加载）与 OpenVINO（编译期可选），全不可用返回 `NULL` 并写同时说明两条路径的 err |
 | `chronos_process(session, in, out, &w, &h, err, err_len)` | 读图→切片→推理→羽化拼接→落盘，返回 0 / 负错误码 |
 | `chronos_session_progress(session, &done, &total)` | 原子读取当前图片的 tile 进度，Go 侧 50ms 轮询 |
 | `chronos_session_cancel(session)` | 置取消位；pipeline 在 tile 边界检查并尽快返回 `CHRONOS_ERR_CANCELLED` |
@@ -39,9 +41,39 @@ Vue 3 UI ──Wails bindings (JSON)──▶ Go 调度层 ──CGO (chronos.h)
  0 OK | -1 IO | -2 MODEL | -3 INFER | -4 PARAM | -5 BACKEND | -6 CANCELLED | -99 UNKNOWN
 ```
 
-后端 id：`0 NONE | 1 STUB | 2 OPENVINO`；`chronos_backend_name` 返回 `none` / `stub` / `openvino`。
+后端 id：`0 NONE | 1 STUB | 2 OPENVINO | 3 ORT`；`chronos_backend_name` 返回
+`none` / `stub` / `openvino` / `ort`。
 `chronos_options.struct_size` 必须为 `sizeof(chronos_options)`；为 0 时按默认值（tile 256 / overlap 16 / threads=hw / device 0 / flags 0）。
 `CHRONOS_FLAG_PRESERVE_ALPHA` 由 Go 侧始终设置（PNG 输出保留透明通道）。
+
+### 1.1 运行时能力探测（v3 新增，只增不改）
+
+```c
+/* 运行时能否加载 ONNX Runtime（动态加载，与构建方式无关）。1 = 可加载。 */
+int chronos_ort_available(void);
+
+/* 写 e.g. "1.24.4"; 返回长度，未加载时返回 0。 */
+int chronos_ort_version(char* buf, int buf_len);
+
+/*
+ * JSON 能力报告（实现见 docs/PLAN-v0.3.md §5）。返回写入长度，失败返回负错误码。
+ * 报告内容只增不删；前端对缺字段做可选处理。
+ */
+int chronos_backend_probe(char* buf, int buf_len);
+```
+
+`chronos_backend_probe` 报告形状：
+
+```json
+{
+  "cpus": 16,
+  "ort": { "available": true, "version": "1.24.4", "providers": ["CPU", "DML"] },
+  "openvino": { "available": false },
+  "model": { "loaded": true, "sidecarFound": true, "tileAlign": 8, "fixedSize": 0, "scale": 4 },
+  "device": { "selected": "CPU", "name": "", "fallbackReason": "" },
+  "warnings": []
+}
+```
 
 ## 2. 算力层内部契约（C++）
 
@@ -49,7 +81,10 @@ Vue 3 UI ──Wails bindings (JSON)──▶ Go 调度层 ──CGO (chronos.h)
 - 每个 tile 取 `tile×tile` 输入区域（越界用边缘复制），推理后得到 `tile*scale` 的 patch。
 - 羽化：每维权重 = 两端升线性渐变（1 LSB 下限），写回时**权重累加再归一化**；常量图必须逐位不变（已成测试）。
 - 进度：`done/total` 以 tile 数计，原子自增；取消标志在整个 session 生命周期内保持（粘性）。
-- stub 后端支持 `scale ∈ {1,2,3,4}`；OpenVINO 后端以模型原生 scale 为准（请求 scale 仅校验）。
+- stub 后端支持 `scale ∈ {1,2,3,4}`；ORT/OpenVINO 后端以模型原生 scale 为准（请求 scale 仅校验）。
+- **模型对齐**：`tileAlign > 0` 时实际 tile 向上取整到该倍数；`fixedSize > 0` 时实际 tile 固定为该值
+  （这两个值来自 sidecar，见 §8.1）。
+- **输出裁剪**：`crop > 0` 时每个 patch 先从四周裁掉 `crop` 像素，再进入羽化拼接。
 
 ## 3. Go ⇄ 前端：App 方法
 
@@ -62,6 +97,14 @@ Vue 3 UI ──Wails bindings (JSON)──▶ Go 调度层 ──CGO (chronos.h)
 GetAppInfo() AppInfo
 ListModels() []ModelInfo
 RefreshModels() []ModelInfo
+PullModel(req PullModelRequest) (ModelPullState, error)   // v3：启动下载（异步），立即返回
+CancelPull(modelID string) bool                           // v3
+RemoveModel(modelID string) error                         // v3：删除 <modelDir>/<id>/
+ImportModel(req ImportModelRequest) (ModelInfo, error)    // v3：外部 .onnx / 目录导入
+SelfTestModel(modelID string) (ModelSelfTest, error)      // v3：体检 + 试跑 + 拼接不变性
+GetModelDiagnostics(modelID string) ModelDiagnostics      // v3：可复制的诊断文本
+GetAccelStatus() AccelStatus                              // v3：后端/EP/设备/降级原因
+SetAccelMode(mode string) (AccelStatus, error)            // v3："auto" | "cpu"
 UpscaleBatch(req BatchRequest) (BatchResult, error)
 CancelJob(jobID string) bool
 SetConcurrency(n int) error                 // 1..8
@@ -70,6 +113,7 @@ SetInhibit(req InhibitRequest) (InhibitStatus, error)
 GetInhibitStatus() InhibitStatus
 PickImages() []string                       // 浏览器模式返回空
 PickOutputDir() string                      // 浏览器模式返回空
+PickModelFile() string                      // v3：桌面选模型文件；浏览器模式返回空
 Reveal(path string) error
 OpenDataDir() error
 ListDirectory(path string) (DirListing, error)   // 浏览器模式服务器端文件选择
@@ -111,12 +155,24 @@ type AppInfo struct {
     BrowseSupported bool        `json:"browseSupported"` // browser => true
 }
 
+// v3：字段只增不删；旧前端忽略新字段即可。
 type EngineInfo struct {
-    Backend    string `json:"backend"`  // "openvino" | "stub" | "go-lanczos"
-    Device     string `json:"device"`   // "GPU" | "CPU" | "n/a"
-    Detail     string `json:"detail"`
-    ABIVersion int    `json:"abiVersion"`
-    Native     bool   `json:"native"`
+    Backend        string `json:"backend"`        // "ort" | "openvino" | "stub" | "go-lanczos"
+    EP             string `json:"ep"`             // "CPU" | "DML" | "CUDA" | "" (v3)
+    Device         string `json:"device"`         // "GPU" | "CPU" | "n/a"
+    DeviceName     string `json:"deviceName"`     // 显卡/CPU 型号，可为空 (v3)
+    Detail         string `json:"detail"`
+    FallbackReason string `json:"fallbackReason"` // 想用 GPU 但降级的真实原因 (v3)
+    ABIVersion     int    `json:"abiVersion"`
+    Native         bool   `json:"native"`
+}
+
+type AccelStatus struct {           // v3
+    Mode           string   `json:"mode"`     // "auto" | "cpu"
+    Active         EngineInfo `json:"active"`
+    Available      []string `json:"available"` // 例如 ["CPU","DML"]
+    GpuUsable      bool     `json:"gpuUsable"`
+    FallbackReason string   `json:"fallbackReason"`
 }
 
 type ModelInfo struct {
@@ -129,6 +185,60 @@ type ModelInfo struct {
     Installed   bool    `json:"installed"`
     Path        string  `json:"path"`
     URL         string  `json:"url"`
+    // v3
+    Origin      string  `json:"origin"`      // "registry" | "imported"
+    Verified    bool    `json:"verified"`    // 装完自检通过
+    License     string  `json:"license"`
+    Arch        string  `json:"arch"`
+    Sidecar     bool    `json:"sidecar"`     // 是否已有 model.json
+    FailReason  string  `json:"failReason"`  // 自检失败原因
+}
+
+type PullModelRequest struct {      // v3
+    ModelID string `json:"modelId"`
+    Mirror  string `json:"mirror"`   // "" = 自动（registry → fallback → 镜像前缀）
+}
+
+type ModelPullState struct {        // v3
+    ModelID string `json:"modelId"`
+    Phase   string `json:"phase"`    // queued|resolving|downloading|verifying|installing|selftest|done|failed|cancelled
+    Done    int64  `json:"done"`
+    Total   int64  `json:"total"`    // -1 = 服务器未给 Content-Length
+    Error   string `json:"error"`
+}
+
+type ImportModelRequest struct {    // v3
+    Path     string `json:"path"`     // 单个 .onnx 或包含 .onnx/.data 的目录
+    Name     string `json:"name"`     // 可选显示名
+    AutoDetect bool `json:"autoDetect"` // true = 尽量自动探测 scale/norm/crop
+}
+
+type ModelSelfTest struct {         // v3
+    OK         bool     `json:"ok"`
+    Checks     []SelfTestCheck `json:"checks"`
+    Diagnostics string  `json:"diagnostics"` // 可直接复制给开发者的诊断文本
+}
+
+type SelfTestCheck struct {         // v3
+    Name    string `json:"name"`   // import|shape|size|seam|color|perf
+    OK      bool   `json:"ok"`
+    Detail  string `json:"detail"`
+}
+
+type ModelDiagnostics struct {      // v3
+    ModelID   string   `json:"modelId"`
+    Opset     int      `json:"opset"`
+    Ops       []string `json:"ops"`
+    Inputs    []TensorShape `json:"inputs"`
+    Outputs   []TensorShape `json:"outputs"`
+    Warnings  []string `json:"warnings"`
+    Error     string   `json:"error"`
+}
+
+type TensorShape struct {           // v3
+    Name  string `json:"name"`
+    Dims  []int  `json:"dims"`   // -1 = 动态
+    Dtype string `json:"dtype"`
 }
 
 type BatchRequest struct {
@@ -211,6 +321,8 @@ type InhibitStatus struct {
 | `chronos:job` | `JobSummary` | 每 job 一次 |
 | `chronos:log` | `LogEvent` | 按需 |
 | `chronos:inhibit` | `InhibitStatus` | 状态变化时 |
+| `chronos:model` | `ModelPullState` | v3：下载/自检进度，节流 ≤ 5 次/秒 |
+| `chronos:accel` | `AccelStatus` | v3：加速方式或后端变化时 |
 
 任务完成后若 `BatchRequest.Inhibit.AutoRelease` 为真，Go 侧自动释放并推送一次 `chronos:inhibit`。
 
@@ -219,11 +331,14 @@ type InhibitStatus struct {
 - 输出目录为空 ⇒ 与输入同目录；文件名 `<原名>_chronos_x<scale>.png`。
 - 同名冲突追加 `-1`、`-2`…（直到 999）；输出统一 PNG（保留 alpha）。
 - 跳过：不存在 / 非图片 / 同一 job 内重复路径；写入 `BatchResult.Skipped`。
+- 模型目录布局见 §8.2；**同一模型不能被并发下载两次**（以 modelID 去重）。
 
 ## 4. Go ⇄ C++：CGO 构建契约
 
 - 头文件：`native/include/chronos/chronos.h`；Go `#cgo CFLAGS: -I${SRCDIR}/../../native/include`。
 - 链接：`-L${SRCDIR}/../../native/build -lchronos`；Linux 额外 rpath `$ORIGIN/libs`、`$ORIGIN/../lib`。
+- **不链接 ONNX Runtime**：ORT 由运行期动态加载（ADR-003），因此 `-DCHRONOS_WITH_OPENVINO=ON`
+  与 ORT 可用性是两个独立维度。
 - 构建标签：**仅当** `cgo && chronos_native` 时编译 CGO 实现；否则纯 Go Lanczos 回退。
 - 运行时库：Windows 把 `chronos.dll` 放 exe 同目录（或 PATH）；Linux 用 rpath / `LD_LIBRARY_PATH`。
 
@@ -241,6 +356,14 @@ export interface Api {
   GetAppInfo(): Promise<AppInfo>
   ListModels(): Promise<ModelInfo[]>
   RefreshModels(): Promise<ModelInfo[]>
+  PullModel(req: PullModelRequest): Promise<ModelPullState>
+  CancelPull(modelId: string): Promise<boolean>
+  RemoveModel(modelId: string): Promise<void>
+  ImportModel(req: ImportModelRequest): Promise<ModelInfo>
+  SelfTestModel(modelId: string): Promise<ModelSelfTest>
+  GetModelDiagnostics(modelId: string): Promise<ModelDiagnostics>
+  GetAccelStatus(): Promise<AccelStatus>
+  SetAccelMode(mode: string): Promise<AccelStatus>
   UpscaleBatch(req: BatchRequest): Promise<BatchResult>
   CancelJob(jobId: string): Promise<boolean>
   SetConcurrency(n: number): Promise<void>
@@ -249,6 +372,7 @@ export interface Api {
   GetInhibitStatus(): Promise<InhibitStatus>
   PickImages(): Promise<string[]>
   PickOutputDir(): Promise<string>
+  PickModelFile(): Promise<string>
   Reveal(path: string): Promise<void>
   OpenDataDir(): Promise<void>
   ListDirectory(path: string): Promise<DirListing>
@@ -261,8 +385,11 @@ export interface Api {
 ## 6. 版本与兼容
 
 - C ABI 版本 1；Go 启动时 `chronos_abi_version()` 不符即降级并写日志。
+- v3 的 C 侧新增只有**新符号**与 `CHRONOS_BACKEND_ORT` 常量，既有函数签名与结构体布局不变；
+  `chronos_options.reserved[4]` 保留，未来扩展不得改变既有字段语义。
 - 前端只依赖 JSON 字段名，字段只增不删；新增字段前端做可选处理。
-- 模型 registry：`internal/models/registry.json`（单源，Go `embed`）。
+- 模型 registry：`internal/models/registry.json`（单源，Go `embed`）；schema v2 见 §8.2。
+- sidecar schema 见 §8.1，**Go 与 C++ 共用同一份 JSON 字段名**，两端测试引用同一 fixture。
 
 ## 7. 浏览器模式（无 WebView2 / WebKit 时）
 
@@ -279,3 +406,60 @@ export interface Api {
 - CLI 的资源解析顺序：`--assets` → `CHRONOS_ASSETS` → `<exeDir>/web` → `<exeDir>/frontend/dist`
   → `./frontend/dist` → `./web`。
 - 打包：`chronos-<ver>-linux-<arch>-web.tar.gz` 内含 CLI、`libs/libchronos.so`、`web/`、`chronos-web` 启动器。
+
+## 8. v0.3 新增：SR Contract 与模型布局
+
+详细背景、验收标准与排期见 `docs/PLAN-v0.3.md`；此处只冻结接口可见部分。
+
+### 8.1 sidecar：`<modelDir>/<id>/model.json`
+
+```json
+{
+  "inputs":  [{ "name": "input", "source": "image" }],
+  "outputs": [{ "name": "", "scale": 4, "crop": 0 }],
+  "preprocess": { "norm": "0-1", "channels": 3, "mean": [], "std": [] },
+  "constraints": { "tileAlign": 1, "fixedSize": 0, "batch": 1, "dtype": "fp32" },
+  "meta": { "license": "BSD-3-Clause", "arch": "rrdb", "notes": "" }
+}
+```
+
+- `inputs[].source`：`"image"`（该输入接图像）或 `"constant:<float>"`（常量填充，P5 起支持）。
+- `outputs[0].name` 空 ⇒ 取模型第一个 4D 输出。
+- `outputs[0].scale`：**已写入的 sidecar 必须为正**（Go 侧 `Validate` 拒绝 `scale <= 0`）；
+  仅当 sidecar 缺失或未给出 scale 时，C++ 端才按输出/输入空间比例推导，推导不出再用请求的 scale。
+- `preprocess.norm`：`0-1` / `0-255` / `-1-1`；`channels` ∈ `1|3|4`。
+- `constraints.fixedSize > 0` ⇒ tile 固定为该值；`tileAlign > 0` ⇒ tile 向上取整到该倍数。
+- 缺省：norm `0-1`、channels 3、crop 0、tileAlign 1、batch 1、dtype `fp32`。
+
+### 8.2 模型存储布局 v2
+
+```
+<modelDir>/
+  <id>/
+    model.onnx            # 必需
+    model.onnx.data       # 可选（外部权重，ORT 原生支持）
+    model.json            # sidecar
+```
+
+- 旧的扁平 `models/<id>.onnx|.xml` 在首次访问时原子迁移到新布局（幂等）。
+- registry v2 每项新增：`arch`、`license`、`tileAlign`、`norm`、`sha256`（必填）、`extraFiles`（可选）。
+- `sha256` 是下载安装的强校验；缺失即视为 registry 无效（CI 检查）。
+
+### 8.3 SR Contract（必须逐条满足）
+
+| 项 | 要求 |
+| --- | --- |
+| 输入 | 恰好 1 个图像张量，4D NCHW，N=1，C=3（C=1/4 由适配层转换） |
+| 输入 dtype | `float32`（`float16` 允许） |
+| 输出 | ≥1 个；`outputs[0]` 指向的张量必须是 4D NCHW，N=1，C=3 |
+| 倍数 | 整数 1–8（1 = 去噪/去块/修复） |
+| 算子域 | 标准 ONNX 域；`com.microsoft` 需白名单 |
+| 文件 | `.onnx`（可带 `.onnx.data`），≤ 2GB |
+| 不支持 | 多输入图像、多输出里无 4D、LLM/检测分割、int8、`.pb/.tflite/.param` |
+
+## 9. 变更记录
+
+| 日期 | 版本 | 变更 |
+| --- | --- | --- |
+| 2026-11-08 | v2 | 浏览器模式（HTTP+SSE）、`ListDirectory`、`mode`/`browseSupported`、Web 打包 |
+| 2026-11-08 | v3 | ORT 后端 id 3 与能力探测；模型一条龙/导入/自检 RPC；`AccelStatus`；sidecar 与布局 v2；SR Contract |

@@ -85,7 +85,7 @@ Usage:
   chronos upscale [flags] <input...>     upscale images
   chronos info [--json]                  engine/platform diagnostics
   chronos gen -o out.png                 generate a deterministic test image
-  chronos models <list|pull|path|import|dir>
+  chronos models <list|pull|path|import|dir|hash|migrate>
   chronos inhibit <on|off|status> [flags] sleep/display/lock inhibition
   chronos bench [flags]                  throughput micro-benchmark
   chronos version
@@ -370,14 +370,18 @@ func absOrDot(path string) string {
 
 func runModels(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: chronos models <list|pull|path|import|dir>")
+		return fmt.Errorf("usage: chronos models <list|pull|path|import|dir|hash|migrate>")
+	}
+	sub := args[0]
+	rest := args[1:]
+	// hash works on the source-tree registry.json and needs no cache dir.
+	if sub == "hash" {
+		return runModelsHash(ctx, rest)
 	}
 	store, err := models.NewStore("", nil)
 	if err != nil {
 		return err
 	}
-	sub := args[0]
-	rest := args[1:]
 	switch sub {
 	case "list":
 		fs := flag.NewFlagSet("models list", flag.ContinueOnError)
@@ -437,6 +441,25 @@ func runModels(ctx context.Context, args []string) error {
 		return nil
 	case "dir":
 		fmt.Println(store.Dir())
+		return nil
+	case "migrate":
+		migs := store.MigrateAll()
+		if len(migs) == 0 {
+			fmt.Println("no legacy flat model files to migrate")
+			return nil
+		}
+		failed := 0
+		for _, m := range migs {
+			if m.Err != nil {
+				failed++
+				fmt.Fprintf(os.Stderr, "%s: FAILED %v\n", m.ID, m.Err)
+				continue
+			}
+			fmt.Printf("%s: %s -> %s\n", m.ID, m.From, m.To)
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d legacy model file(s) could not be migrated", failed)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown models subcommand %q", sub)

@@ -58,7 +58,7 @@ const LOG_LEVEL_NAME: Record<string, string> = { debug: 'DBG', info: 'INF', warn
   <section class="shrink-0 border-t border-line bg-ink-900/80 backdrop-blur">
     <button
       type="button"
-      class="flex h-[30px] w-full items-center gap-2 px-4 text-left transition-colors hover:bg-white/[0.03]"
+      class="flex h-[30px] w-full items-center gap-2 px-4 text-left transition-colors hover:bg-overlay/[0.03]"
       :aria-expanded="expanded"
       aria-label="展开或折叠日志控制台"
       @click="toggle"

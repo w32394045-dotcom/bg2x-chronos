@@ -67,6 +67,50 @@ ResampleFilter filter_from_options(const Options& options) {
 }
 
 /*
+ * Model path => ONNX Runtime first (its runtime is loaded dynamically, so this
+ * works in every build once the library is present), then OpenVINO when it was
+ * compiled in. On failure the message names every attempt, what is actually
+ * available and how to fix it, because it is shown directly to users.
+ *
+ * TODO(P4): add a chronos_session_create_ex(..., const char* sidecar_json, ...)
+ * entry point so the Go layer can pass the sidecar JSON explicitly. For now
+ * backend_ort derives <model_dir>/model.json from model_path; the frozen
+ * chronos_session_create() signature stays unchanged.
+ */
+std::unique_ptr<IBackend> create_model_backend(const std::string& model_path, int scale,
+                                               const Options& options, std::string* err) {
+  std::string ort_error;
+  std::unique_ptr<IBackend> backend = create_ort_backend(model_path, scale, options, &ort_error);
+  if (backend) return backend;
+
+  std::string openvino_error;
+  backend = create_openvino_backend(model_path, scale, options, &openvino_error);
+  if (backend) return backend;
+
+  const bool ort_ready = ort_available();
+  const bool openvino_ready = openvino_available();
+
+  std::string available = "stub";
+  if (ort_ready) available += ", ort";
+  if (openvino_ready) available += ", openvino";
+
+  /* Name every attempt, say what is missing, then name what is available. */
+  std::string message = "cannot load model '" + model_path + "': ONNX Runtime: " + ort_error +
+                        "; OpenVINO: " + openvino_error + ". ";
+  if (!ort_ready) {
+    message +=
+        "ONNX Runtime runtime not found (set CHRONOS_ORT_DIR to the directory containing "
+        "onnxruntime.dll, or ship the library as <exe dir>/ort). ";
+  }
+  if (!openvino_ready) {
+    message += "this build also has no OpenVINO support. ";
+  }
+  message += "Available backends: " + available + ".";
+  set_error(err, message);
+  return nullptr;
+}
+
+/*
  * Extracts the alpha channel of a 4-channel image into a 1-channel image so it
  * can be scaled independently of the RGB inference path.
  */
@@ -112,7 +156,7 @@ std::unique_ptr<Pipeline> Pipeline::create(const std::string& model_path, int sc
       pipeline->impl_->scale = scale;
       pipeline->impl_->backend = create_stub_backend(scale, normalized, err);
     } else {
-      pipeline->impl_->backend = create_openvino_backend(model_path, scale, normalized, err);
+      pipeline->impl_->backend = create_model_backend(model_path, scale, normalized, err);
       if (pipeline->impl_->backend) {
         const int native_scale = pipeline->impl_->backend->native_scale();
         if (scale > 0 && native_scale > 0 && scale != native_scale) {
@@ -151,7 +195,7 @@ int Pipeline::process(const std::string& in_path, const std::string& out_path, i
   if (rc != CHRONOS_OK) return rc;
 
   TilePlan plan;
-  /* OpenVINO models dictate their own (static) tile size. */
+  /* Model backends (ONNX Runtime / OpenVINO) dictate their own tile size. */
   const int tile_size = self.backend->tile_size_for(self.options.tile_size);
   rc = plan_tiles(source.width, source.height, tile_size, self.options.overlap, self.scale,
                   &plan, err);

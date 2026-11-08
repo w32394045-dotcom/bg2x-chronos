@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Project Chronos - C ABI tests.
  *
  * Covers: ABI/version/backend introspection, thread-local last_error, option
@@ -55,6 +55,7 @@ TEST(c_api, abi_and_backend_introspection) {
   CHECK(std::strcmp(chronos_backend_name(CHRONOS_BACKEND_NONE), "none") == 0);
   CHECK(std::strcmp(chronos_backend_name(CHRONOS_BACKEND_STUB), "stub") == 0);
   CHECK(std::strcmp(chronos_backend_name(CHRONOS_BACKEND_OPENVINO), "openvino") == 0);
+  CHECK(std::strcmp(chronos_backend_name(CHRONOS_BACKEND_ORT), "ort") == 0);
   /* Unknown ids must still return a non-NULL, printable name. */
   CHECK(chronos_backend_name(1234) != nullptr);
 
@@ -62,11 +63,46 @@ TEST(c_api, abi_and_backend_introspection) {
   CHECK_EQ(chronos_backend_available(CHRONOS_BACKEND_NONE), 0);
   const int openvino = chronos_backend_available(CHRONOS_BACKEND_OPENVINO);
   CHECK(openvino == 0 || openvino == 1);
+  /* The ORT backend is always built; availability depends on the dynamically
+   * loaded runtime library, so both 0 and 1 are valid here. */
+  const int ort = chronos_backend_available(CHRONOS_BACKEND_ORT);
+  CHECK(ort == 0 || ort == 1);
   CHECK(chronos_last_error() != nullptr);
 }
 
-TEST(c_api, session_lifecycle_and_describe) {
-  const chronos_options options = default_options();
+TEST(c_api, runtime_capability_probe) {
+  CHECK_EQ(chronos_abi_version(), 1);
+  const int ort = chronos_ort_available();
+  CHECK(ort == 0 || ort == 1);
+  CHECK_EQ(chronos_ort_available(), chronos_backend_available(CHRONOS_BACKEND_ORT));
+
+  /* NULL/zero buffer asks for the required length. */
+  const int required = chronos_backend_probe(nullptr, 0);
+  CHECK(required > 0);
+  std::string json(static_cast<size_t>(required) + 1, '\0');
+  const int written = chronos_backend_probe(&json[0], required + 1);
+  CHECK_EQ(written, required);
+  CHECK_EQ(json[static_cast<size_t>(written)], '\0');
+  CHECK_EQ(json.front(), '{');
+  CHECK_EQ(json[static_cast<size_t>(written) - 1], '}');
+  CHECK(json.find("\"cpus\"") != std::string::npos);
+  CHECK(json.find("\"ort\"") != std::string::npos);
+  CHECK(json.find("\"available\"") != std::string::npos);
+  CHECK(json.find("\"providers\"") != std::string::npos);
+  CHECK(json.find("\"openvino\"") != std::string::npos);
+  CHECK(json.find("\"warnings\"") != std::string::npos);
+  std::printf("c_api: probe=%s\n", json.c_str());
+
+  /* Tiny buffer: truncated but NUL terminated. */
+  char tiny[8];
+  std::memset(tiny, 'x', sizeof(tiny));
+  const int tiny_length = chronos_backend_probe(tiny, static_cast<int>(sizeof(tiny)));
+  CHECK(tiny_length >= 0);
+  CHECK(tiny_length <= static_cast<int>(sizeof(tiny)) - 1);
+  CHECK_EQ(tiny[tiny_length], '\0');
+}
+
+TEST(c_api, session_lifecycle_and_describe) {  const chronos_options options = default_options();
   char error[512];
   error[0] = '\0';
   chronos_session* session =

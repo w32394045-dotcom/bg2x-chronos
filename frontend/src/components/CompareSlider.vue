@@ -76,7 +76,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 p-4 backdrop-blur-sm" @click.self="emit('close')">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm" @click.self="emit('close')">
     <div class="flex h-full max-h-[680px] w-full max-w-[980px] flex-col overflow-hidden rounded-xl border border-line bg-ink-850 shadow-2xl">
       <div class="flex items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
         <Icon name="compare" :size="15" class="text-brand-300" />
@@ -128,7 +128,7 @@ onUnmounted(() => {
         </div>
 
         <!-- 分割线与手柄 -->
-        <div class="pointer-events-none absolute inset-y-0 w-px bg-brand-300/90 shadow-[0_0_12px_rgba(108,235,219,0.55)]" :style="{ left: `${position}%` }" />
+        <div class="pointer-events-none absolute inset-y-0 w-px bg-brand-300/90 shadow-compare" :style="{ left: `${position}%` }" />
         <div
           class="pointer-events-none absolute top-1/2 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-brand-300/70 bg-ink-950/90 text-brand-200 shadow-lg"
           :style="{ left: `${position}%` }"
@@ -136,9 +136,9 @@ onUnmounted(() => {
           <Icon name="compare" :size="15" />
         </div>
 
-        <span class="pointer-events-none absolute left-2.5 top-2.5 chip bg-ink-950/80 text-mute-strong ring-white/15">原图</span>
+        <span class="pointer-events-none absolute left-2.5 top-2.5 chip bg-ink-950/80 text-mute-strong ring-overlay/15">原图</span>
         <span class="pointer-events-none absolute right-2.5 top-2.5 chip bg-brand-500/20 text-brand-200 ring-brand-400/40">超分结果</span>
-        <span class="pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 chip bg-ink-950/80 font-mono text-mute ring-white/15">
+        <span class="pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 chip bg-ink-950/80 font-mono text-mute ring-overlay/15">
           {{ Math.round(position) }}%
         </span>
       </div>

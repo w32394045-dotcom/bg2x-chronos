@@ -17,6 +17,26 @@ type InhibitPrefs struct {
 	AutoRelease bool `json:"autoRelease"`
 }
 
+// UI theme identifiers (docs/CONTRACTS.md v3, docs/PLAN-v0.3.md).
+const (
+	ThemeDark   = "dark"
+	ThemeLight  = "light"
+	ThemeClaude = "claude"
+)
+
+// Acceleration modes: auto tries a GPU execution provider and falls back to CPU;
+// cpu forbids GPU providers entirely (docs/CONTRACTS.md v3 AccelStatus).
+const (
+	AccelAuto = "auto"
+	AccelCPU  = "cpu"
+)
+
+// UI scale bounds (frontend zoom, 0.1 steps).
+const (
+	MinUIScale = 0.8
+	MaxUIScale = 1.5
+)
+
 // Settings is the whole persisted state.
 type Settings struct {
 	Concurrency int          `json:"concurrency"`
@@ -28,6 +48,9 @@ type Settings struct {
 	Threads     int          `json:"threads"`
 	Fast        bool         `json:"fast"`
 	Inhibit     InhibitPrefs `json:"inhibit"`
+	Theme       string       `json:"theme"`     // dark | light | claude
+	UIScale     float64      `json:"uiScale"`   // MinUIScale .. MaxUIScale
+	AccelMode   string       `json:"accelMode"` // auto | cpu
 }
 
 // Defaults returns the starting settings.
@@ -38,7 +61,28 @@ func Defaults() Settings {
 		TileSize:    256,
 		Overlap:     16,
 		Threads:     0,
+		Theme:       ThemeDark,
+		UIScale:     1.0,
+		AccelMode:   AccelAuto,
 	}
+}
+
+// ValidTheme reports whether name is a known UI theme.
+func ValidTheme(name string) bool {
+	switch name {
+	case ThemeDark, ThemeLight, ThemeClaude:
+		return true
+	}
+	return false
+}
+
+// ValidAccelMode reports whether mode is a known acceleration mode.
+func ValidAccelMode(mode string) bool {
+	switch mode {
+	case AccelAuto, AccelCPU:
+		return true
+	}
+	return false
 }
 
 // DataDir is the per-user config directory for Chronos.
@@ -94,6 +138,23 @@ func Load(dir string) (*Settings, error) {
 	}
 	if s.Scale < 1 || s.Scale > 8 {
 		s.Scale = 4
+	}
+	// v0.3 UI/acceleration preferences: older settings.json files simply lack
+	// these fields, so empty means "use the default".
+	if !ValidTheme(s.Theme) {
+		s.Theme = ThemeDark
+	}
+	if s.UIScale == 0 {
+		s.UIScale = 1.0
+	}
+	if s.UIScale < MinUIScale {
+		s.UIScale = MinUIScale
+	}
+	if s.UIScale > MaxUIScale {
+		s.UIScale = MaxUIScale
+	}
+	if !ValidAccelMode(s.AccelMode) {
+		s.AccelMode = AccelAuto
 	}
 	return &s, nil
 }

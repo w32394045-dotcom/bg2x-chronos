@@ -121,7 +121,7 @@ onUnmounted(() => {
       class="pointer-events-none absolute inset-0 opacity-40 transition-opacity"
       :class="dragging ? 'opacity-100' : ''"
       style="
-        background-image: radial-gradient(420px 120px at 50% 0%, rgba(34, 200, 189, 0.12), transparent 70%);
+        background-image: radial-gradient(420px 120px at 50% 0%, var(--c-drop-glow), transparent 70%);
       "
     />
     <div class="relative flex items-center gap-3.5">
@@ -144,7 +144,7 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="hidden shrink-0 items-center gap-1.5 sm:flex">
-        <span v-if="queueSummary.total > 0" class="chip bg-white/5 text-mute ring-white/10">
+        <span v-if="queueSummary.total > 0" class="chip bg-overlay/5 text-mute ring-overlay/10">
           队列 {{ queueSummary.total }}
         </span>
         <button

@@ -28,7 +28,7 @@ export function modelKindLabel(kind: string): string {
 }
 
 export function modelKindClass(kind: string): string {
-  return MODEL_KIND_CLASS[kind] ?? 'bg-white/5 text-mute ring-white/10'
+  return MODEL_KIND_CLASS[kind] ?? 'bg-overlay/5 text-mute ring-overlay/10'
 }
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {
@@ -41,12 +41,12 @@ export const STATUS_LABEL: Record<ItemStatus, string> = {
 }
 
 export const STATUS_CLASS: Record<ItemStatus, string> = {
-  queued: 'bg-white/5 text-mute ring-white/10',
+  queued: 'bg-overlay/5 text-mute ring-overlay/10',
   running: 'bg-brand-500/10 text-brand-300 ring-brand-400/30',
   done: 'bg-emerald-500/10 text-emerald-300 ring-emerald-400/25',
   failed: 'bg-rose-500/10 text-rose-300 ring-rose-400/25',
   cancelled: 'bg-amber-500/10 text-amber-300 ring-amber-400/25',
-  skipped: 'bg-white/5 text-mute-soft ring-white/10',
+  skipped: 'bg-overlay/5 text-mute-soft ring-overlay/10',
 }
 
 export const LOG_LEVEL_CLASS: Record<string, string> = {

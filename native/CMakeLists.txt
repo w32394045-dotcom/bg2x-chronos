@@ -49,6 +49,10 @@ set(CHRONOS_SOURCES
     src/thread_pool.cpp
     src/backend_stub.cpp
     src/backend_openvino.cpp
+    src/platform_io.cpp
+    src/ort_loader.cpp
+    src/ort_sidecar.cpp
+    src/backend_ort.cpp
     src/pipeline.cpp
     src/c_api.cpp)
 
@@ -152,11 +156,13 @@ if(CHRONOS_BUILD_TESTS)
       tests/test_image_io.cpp
       tests/test_pipeline.cpp
       tests/test_c_api.cpp
+      tests/test_ort.cpp
       tests/test_threads.cpp)
   target_include_directories(chronos_tests PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/tests"
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src")
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
   target_link_libraries(chronos_tests PRIVATE chronos_static)
   if(MINGW)
     target_link_options(chronos_tests PRIVATE -static)
@@ -167,13 +173,27 @@ if(CHRONOS_BUILD_TESTS)
   endif()
 
   # One ctest entry per suite keeps failures readable.
-  foreach(suite tiling blending resample image_io pipeline c_api threads)
+  foreach(suite tiling blending resample image_io pipeline c_api threads ort)
     add_test(NAME native_${suite} COMMAND chronos_tests --suite ${suite})
   endforeach()
   add_test(NAME native_all COMMAND chronos_tests)
   add_test(NAME native_cli_info COMMAND chronos_native_cli --info)
   set_tests_properties(native_cli_info PROPERTIES
       PASS_REGULAR_EXPRESSION "stub.*true")
+
+  # The ORT backend needs the dynamically loaded ONNX Runtime library at run
+  # time. Without it test_ort.cpp prints a SKIP message and exits with 77, which
+  # ctest reports as "Skipped" instead of a failure. The fixture directory is
+  # passed through the environment because the repository path may contain
+  # non-ASCII characters (a compile definition would be narrowed through the
+  # toolchain's ANSI code page on Windows).
+  set_tests_properties(native_ort PROPERTIES SKIP_RETURN_CODE 77)
+  set(CHRONOS_ORT_TEST_ENV
+      "CHRONOS_TEST_FIXTURES_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+  if(DEFINED ENV{CHRONOS_ORT_DIR} AND NOT "$ENV{CHRONOS_ORT_DIR}" STREQUAL "")
+    list(APPEND CHRONOS_ORT_TEST_ENV "CHRONOS_ORT_DIR=$ENV{CHRONOS_ORT_DIR}")
+  endif()
+  set_tests_properties(native_ort native_all PROPERTIES ENVIRONMENT "${CHRONOS_ORT_TEST_ENV}")
 
   # End-to-end through the shared library: the c_api suite writes the fixture,
   # then the CLI (linked against chronos.dll) upscales it.
@@ -195,3 +215,5 @@ install(DIRECTORY include/ DESTINATION include)
 
 message(STATUS "chronos: version ${PROJECT_VERSION}, OpenVINO=${CHRONOS_WITH_OPENVINO}, "
                "tests=${CHRONOS_BUILD_TESTS}, sanitize=${CHRONOS_SANITIZE}")
+message(STATUS "chronos: ONNX Runtime backend is always built and loads "
+               "onnxruntime.dll/libonnxruntime.so at run time (CHRONOS_ORT_DIR)")

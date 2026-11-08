@@ -28,6 +28,24 @@ std::vector<TestCase>& registry();
 /* Throws std::runtime_error; the runner reports the failure and continues. */
 void report_failure(const char* file, int line, const std::string& message);
 
+/*
+ * Thrown by SKIP_TEST(). The runner reports the test as skipped instead of
+ * failed and exits with 77 when every selected test was skipped, so ctest can
+ * mark the suite "Skipped" (SKIP_RETURN_CODE).
+ */
+struct SkipTest {
+  std::string message;
+};
+
+[[noreturn]] inline void report_skip(const char* file, int line, const std::string& message) {
+  std::string location = file != nullptr ? std::string(file) : std::string("?");
+  location += ":";
+  location += std::to_string(line);
+  location += ": ";
+  location += message;
+  throw SkipTest{location};
+}
+
 struct Registrar {
   Registrar(const char* suite, const char* name, std::function<void()> fn);
 };
@@ -100,5 +118,8 @@ void check_near(const A& actual, const B& expected, double epsilon, const char* 
 
 #define CHECK_TRUE(condition) CHECK(condition)
 #define CHECK_FALSE(condition) CHECK(!(condition))
+
+/* Marks a test as skipped (not failed) with a human readable reason. */
+#define SKIP_TEST(message) ::chronos_test::report_skip(__FILE__, __LINE__, (message))
 
 #endif /* CHRONOS_TEST_HARNESS_H */

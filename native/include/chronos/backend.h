@@ -1,9 +1,12 @@
 /*
  * Project Chronos — inference backend interface.
  *
- * Two implementations ship with the project:
+ * Three implementations ship with the project:
  *   - stub backend (always built): high quality Lanczos3 / bilinear upscale,
  *     no model, no external dependency.
+ *   - ONNX Runtime backend (always built, runtime loaded dynamically): loads a
+ *     .onnx model through the ORT C API; no link-time dependency on ONNX
+ *     Runtime (see src/ort_loader.h). Reports CHRONOS_BACKEND_ORT.
  *   - OpenVINO backend (only built with -DCHRONOS_WITH_OPENVINO=ON): loads an
  *     OpenVINO IR (.xml) or ONNX (.onnx) model and runs tiles through an
  *     N-deep asynchronous ov::InferRequest pipeline.
@@ -52,13 +55,13 @@ class IBackend {
  public:
   virtual ~IBackend() = default;
 
-  /* CHRONOS_BACKEND_STUB / CHRONOS_BACKEND_OPENVINO. */
+  /* CHRONOS_BACKEND_STUB / CHRONOS_BACKEND_ORT / CHRONOS_BACKEND_OPENVINO. */
   virtual int id() const noexcept = 0;
 
   /* Scale factor this backend actually produces. */
   virtual int native_scale() const noexcept = 0;
 
-  /* e.g. "stub/Lanczos3" or "openvino/GPU.0". */
+  /* e.g. "stub/Lanczos3", "ort/CPU" or "openvino/GPU.0". */
   virtual std::string describe() const = 0;
 
   /* True when run_batch() must be used instead of infer_tile(). */
@@ -114,6 +117,28 @@ bool openvino_available() noexcept;
 std::unique_ptr<IBackend> create_openvino_backend(const std::string& model_path,
                                                   int requested_scale,
                                                   const Options& options, std::string* err);
+
+/* Runtime availability of the ONNX Runtime backend: the shared library
+ * (onnxruntime.dll / libonnxruntime.so) could be loaded and OrtGetApiBase
+ * returned a compatible OrtApi. This checks the runtime, not a build flag. */
+bool ort_available() noexcept;
+
+/*
+ * ONNX Runtime backend. The runtime library is loaded dynamically; when it is
+ * absent the factory returns nullptr and *err explains where the loader looked
+ * (CHRONOS_ORT_DIR, <exe dir>/ort, <exe dir>/runtime/ort, system loader).
+ *
+ * An optional sidecar file <model_dir>/model.json overrides input/output names,
+ * scale, crop, tile alignment, normalization and the input channel count; see
+ * src/ort_sidecar.h for the schema. requested_scale <= 0 means "use the model's
+ * native scale" (sidecar scale, else the output/input ratio).
+ *
+ * Thread safety: infer_tile() may be called concurrently, but at most one Run()
+ * executes at a time per instance (documented in backend_ort.cpp).
+ */
+std::unique_ptr<IBackend> create_ort_backend(const std::string& model_path,
+                                             int requested_scale, const Options& options,
+                                             std::string* err);
 
 }  // namespace chronos
 

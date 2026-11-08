@@ -142,7 +142,7 @@ function setScale(value: number): void {
           >
             <div class="flex items-center gap-1.5">
               <span class="text-[12px] font-medium text-mute-strong">无模型（内置 Lanczos）</span>
-              <span class="chip bg-white/5 text-mute ring-white/10">stub</span>
+              <span class="chip bg-overlay/5 text-mute ring-overlay/10">stub</span>
               <span class="ml-auto text-[10px] text-mute-soft">回退引擎</span>
             </div>
             <p class="mt-0.5 text-[10.5px] text-mute-soft">无 OpenVINO 模型时走纯 CPU 回退，任意倍率稳定输出。</p>
@@ -166,7 +166,7 @@ function setScale(value: number): void {
               <span class="chip shrink-0" :class="modelKindClass(model.kind)">
                 {{ MODEL_KIND_LABEL[model.kind] ?? model.kind }}
               </span>
-              <span class="chip shrink-0 bg-white/5 font-mono text-mute-soft ring-white/10">x{{ model.scale }}</span>
+              <span class="chip shrink-0 bg-overlay/5 font-mono text-mute-soft ring-overlay/10">x{{ model.scale }}</span>
               <span
                 class="ml-auto chip shrink-0"
                 :class="

@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
 
   int passed = 0;
   int failed = 0;
+  int skipped = 0;
   for (const chronos_test::TestCase& test : tests) {
     if (!suite_filter.empty() && test.suite != suite_filter) continue;
     std::printf("[ RUN      ] %s.%s\n", test.suite.c_str(), test.name.c_str());
@@ -84,6 +85,10 @@ int main(int argc, char** argv) {
       test.fn();
       std::printf("[       OK ] %s.%s\n", test.suite.c_str(), test.name.c_str());
       ++passed;
+    } catch (const chronos_test::SkipTest& skip) {
+      std::printf("[  SKIP    ] %s.%s\n            %s\n", test.suite.c_str(), test.name.c_str(),
+                  skip.message.c_str());
+      ++skipped;
     } catch (const std::exception& exception) {
       std::printf("[  FAILED  ] %s.%s\n            %s\n", test.suite.c_str(), test.name.c_str(),
                   exception.what());
@@ -96,16 +101,21 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
   }
 
-  if (passed == 0 && failed == 0) {
+  if (passed == 0 && failed == 0 && skipped == 0) {
     std::fprintf(stderr, "no tests matched suite '%s'\n", suite_filter.c_str());
     return 1;
   }
 
   std::printf("------------------------------------------------\n");
   std::printf("[  PASSED  ] %d test(s)\n", passed);
+  if (skipped > 0) std::printf("[  SKIPPED ] %d test(s)\n", skipped);
   if (failed > 0) {
     std::printf("[  FAILED  ] %d test(s)\n", failed);
     return 1;
+  }
+  if (passed == 0 && skipped > 0) {
+    /* Whole suite skipped: 77 is CTest's SKIP_RETURN_CODE for native_ort. */
+    return 77;
   }
   return 0;
 }
