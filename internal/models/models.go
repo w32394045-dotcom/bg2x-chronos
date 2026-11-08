@@ -123,7 +123,28 @@ type Info struct {
 	License string `json:"license,omitempty"`
 	Arch    string `json:"arch,omitempty"`
 	Sidecar bool   `json:"sidecar"` // model.json exists next to the weights
+
+	// v0.3 additions: imported models live in the cache dir but are not in the
+	// bundled registry, and self-test state is persisted as marker files.
+	Origin     string `json:"origin"`     // "registry" | "imported"
+	Verified   bool   `json:"verified"`   // self-test passed (marker file present)
+	FailReason string `json:"failReason"` // last self-test failure, if any
 }
+
+// Origins reported in Info.Origin.
+const (
+	OriginRegistry = "registry"
+	OriginImported = "imported"
+)
+
+// Marker files written next to the weights by the self-test path. They are
+// intentionally not part of the sidecar: the sidecar describes the model, the
+// markers describe this machine's verification state.
+const (
+	VerifiedMarker = ".verified"
+	FailedMarker   = ".failed"
+)
+
 
 // Migration records one legacy flat model file (models/<id>.onnx|.xml) that was
 // moved into the v2 layout, or the error that prevented it. Migrations never
@@ -272,10 +293,13 @@ func (s *Store) log(format string, args ...any) {
 }
 
 // List reports every model with installed state, migrating legacy layouts on
-// first access.
+// first access. Registry entries come first; imported models (directories in the
+// cache that are not in the registry) follow, sorted by id.
 func (s *Store) List() []Info {
-	out := make([]Info, 0, len(s.registry.Models))
+	out := make([]Info, 0, len(s.registry.Models)+2)
+	known := make(map[string]bool, len(s.registry.Models))
 	for _, e := range s.registry.Models {
+		known[e.ID] = true
 		path, installed := s.ensureLayout(e)
 		_, sidecarErr := os.Stat(s.SidecarPath(e))
 		out = append(out, Info{
@@ -291,16 +315,91 @@ func (s *Store) List() []Info {
 			License:     e.License,
 			Arch:        e.Arch,
 			Sidecar:     sidecarErr == nil,
+			Origin:      OriginRegistry,
+			Verified:    markerExists(filepath.Join(s.dir, e.ID, VerifiedMarker)),
+			FailReason:  readMarker(filepath.Join(s.dir, e.ID, FailedMarker)),
 		})
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return out
+	}
+	for _, de := range entries {
+		if !de.IsDir() || known[de.Name()] {
+			continue
+		}
+		if info, ok := s.importedInfo(de.Name()); ok {
+			out = append(out, info)
+		}
 	}
 	return out
 }
 
+// importedInfo describes one imported model directory (id = directory name).
+func (s *Store) importedInfo(id string) (Info, bool) {
+	dir := filepath.Join(s.dir, id)
+	weights := ""
+	for _, name := range []string{"model.onnx", "model.xml"} {
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && st.Size() > 0 {
+			weights = p
+			break
+		}
+	}
+	if weights == "" {
+		return Info{}, false
+	}
+	info := Info{
+		ID:        id,
+		Name:      id,
+		Scale:     4,
+		Kind:      "general",
+		Installed: true,
+		Path:      weights,
+		Origin:    OriginImported,
+		Verified:  markerExists(filepath.Join(dir, VerifiedMarker)),
+		FailReason: readMarker(filepath.Join(dir, FailedMarker)),
+	}
+	if sc, err := ParseSidecar(filepath.Join(dir, "model.json")); err == nil {
+		info.Sidecar = true
+		if sc.Outputs != nil && len(sc.Outputs) > 0 && sc.Outputs[0].Scale > 0 {
+			info.Scale = sc.Outputs[0].Scale
+		}
+		info.License = sc.Meta.License
+		info.Arch = sc.Meta.Arch
+		if sc.Meta.Notes != "" {
+			info.Description = sc.Meta.Notes
+		}
+	}
+	if st, err := os.Stat(weights); err == nil {
+		info.SizeMB = float64(st.Size()) / (1024 * 1024)
+	}
+	return info, true
+}
+
+func markerExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func readMarker(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+
 // Resolve returns the local weights path for an installed model and whether it
 // is installed. Migration failures degrade to installed=false with a nil error.
+// Imported models (not in the registry) resolve from their directory.
 func (s *Store) Resolve(id string) (string, bool, error) {
 	e, ok := s.registry.Lookup(id)
 	if !ok {
+		if info, found := s.importedInfo(id); found {
+			return info.Path, true, nil
+		}
 		return "", false, fmt.Errorf("chronos: unknown model %q", id)
 	}
 	path, installed := s.ensureLayout(e)

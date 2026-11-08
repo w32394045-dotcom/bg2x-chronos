@@ -242,10 +242,13 @@ TEST(c_api, unsupported_scale_and_model_path) {
 }
 
 TEST(c_api, writes_cli_fixture_for_end_to_end_test) {
-  /* Consumed by the native_cli_process ctest entry (FIXTURES_REQUIRED). */
+  /* Consumed by the native_cli_process ctest entry (FIXTURES_REQUIRED). Both
+   * processes resolve CHRONOS_TEST_TMPDIR, so the file never lands in the
+   * repository working tree. */
+  const std::string path = chronos_test::temp_path("chronos_cli_fixture.png");
   const chronos::Image fixture = chronos_test::make_constant_rgb(24, 16, 60, 120, 180);
-  chronos_test::write_image_or_fail("chronos_cli_fixture.png", fixture);
-  const chronos::Image loaded = chronos_test::read_image_or_fail("chronos_cli_fixture.png", false);
+  chronos_test::write_image_or_fail(path, fixture);
+  const chronos::Image loaded = chronos_test::read_image_or_fail(path, false);
   CHECK_EQ(loaded.width, 24);
   CHECK_EQ(loaded.height, 16);
 }

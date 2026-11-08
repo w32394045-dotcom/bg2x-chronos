@@ -148,6 +148,18 @@ endif()
 # --- tests ------------------------------------------------------------------
 if(CHRONOS_BUILD_TESTS)
   enable_testing()
+
+  # Scratch directory for every test artifact.
+  #
+  # It intentionally lives inside the build tree instead of the system temp dir:
+  # the build tree is the only place every runner (CI container, developer shell,
+  # confined sandboxes) is guaranteed to be allowed to write. CTest forwards the
+  # path as CHRONOS_TEST_TMPDIR so a manually run test binary can never drop files
+  # into the repository working tree (see tests/test_util.h).
+  set(CHRONOS_TEST_TMPDIR "${CMAKE_CURRENT_BINARY_DIR}/chronos_native_tests")
+  file(TO_CMAKE_PATH "${CHRONOS_TEST_TMPDIR}" CHRONOS_TEST_TMPDIR)
+  set(CHRONOS_TEST_ENV "CHRONOS_TEST_TMPDIR=${CHRONOS_TEST_TMPDIR}")
+
   add_executable(chronos_tests
       tests/test_main.cpp
       tests/test_tiling.cpp
@@ -188,7 +200,7 @@ if(CHRONOS_BUILD_TESTS)
   # non-ASCII characters (a compile definition would be narrowed through the
   # toolchain's ANSI code page on Windows).
   set_tests_properties(native_ort PROPERTIES SKIP_RETURN_CODE 77)
-  set(CHRONOS_ORT_TEST_ENV
+  set(CHRONOS_ORT_TEST_ENV "${CHRONOS_TEST_ENV}"
       "CHRONOS_TEST_FIXTURES_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   if(DEFINED ENV{CHRONOS_ORT_DIR} AND NOT "$ENV{CHRONOS_ORT_DIR}" STREQUAL "")
     list(APPEND CHRONOS_ORT_TEST_ENV "CHRONOS_ORT_DIR=$ENV{CHRONOS_ORT_DIR}")
@@ -196,14 +208,26 @@ if(CHRONOS_BUILD_TESTS)
   set_tests_properties(native_ort native_all PROPERTIES ENVIRONMENT "${CHRONOS_ORT_TEST_ENV}")
 
   # End-to-end through the shared library: the c_api suite writes the fixture,
-  # then the CLI (linked against chronos.dll) upscales it.
+  # then the CLI (linked against chronos.dll) upscales it. Both sides resolve
+  # the same CHRONOS_TEST_TMPDIR, so the file stays out of the working tree.
   add_test(NAME native_cli_process COMMAND chronos_native_cli
-      --in chronos_cli_fixture.png --out chronos_cli_fixture_out.png
+      --in "${CHRONOS_TEST_TMPDIR}/chronos_cli_fixture.png"
+      --out "${CHRONOS_TEST_TMPDIR}/chronos_cli_fixture_out.png"
       --scale 2 --tile 16 --overlap 4 --threads 2)
   set_tests_properties(native_cli_process PROPERTIES
       FIXTURES_REQUIRED chronos_cli_fixture
       PASS_REGULAR_EXPRESSION "done")
   set_tests_properties(native_c_api PROPERTIES FIXTURES_SETUP chronos_cli_fixture)
+
+  # Every test gets the scratch directory, including the ones that only use it
+  # indirectly through the shared chronos_test helpers.
+  foreach(test_name native_tiling native_blending native_resample native_image_io
+                    native_pipeline native_c_api native_threads native_ort
+                    native_all native_cli_info native_cli_process)
+    set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "${CHRONOS_TEST_ENV}")
+  endforeach()
+  # native_ort / native_all need the extra ORT + fixture environment on top.
+  set_tests_properties(native_ort native_all PROPERTIES ENVIRONMENT "${CHRONOS_ORT_TEST_ENV}")
 endif()
 
 # --- install ----------------------------------------------------------------

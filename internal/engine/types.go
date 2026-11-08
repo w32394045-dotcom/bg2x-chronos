@@ -94,6 +94,9 @@ type Config struct {
 	Threads     int
 	DeviceIndex int
 	Fast        bool // bilinear resample instead of Lanczos in stub backend
+	// PreferCPU forbids GPU execution providers. It is advisory until the GPU
+	// runtime component download lands (P3); the current ORT runtime is CPU-only.
+	PreferCPU bool
 }
 
 // Normalize fills defaults and clamps values into supported ranges.
@@ -138,11 +141,14 @@ func (c Config) Validate() error {
 
 // Info describes the active backend.
 type Info struct {
-	Backend    string `json:"backend"` // "openvino" | "stub" | "go-lanczos"
-	Device     string `json:"device"`  // "GPU" | "CPU" | "n/a"
-	Detail     string `json:"detail"`
-	ABIVersion int    `json:"abiVersion"`
-	Native     bool   `json:"native"`
+	Backend        string `json:"backend"` // "ort" | "openvino" | "stub" | "go-lanczos"
+	EP             string `json:"ep"`      // "CPU" | "DML" | "CUDA" | "" (contract v3)
+	Device         string `json:"device"`  // "GPU" | "CPU" | "n/a"
+	DeviceName     string `json:"deviceName"`
+	Detail         string `json:"detail"`
+	FallbackReason string `json:"fallbackReason"`
+	ABIVersion     int    `json:"abiVersion"`
+	Native         bool   `json:"native"`
 }
 
 // Progress is emitted while one image is being processed.

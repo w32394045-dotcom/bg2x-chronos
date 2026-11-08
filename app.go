@@ -76,6 +76,36 @@ func (a *App) ListDirectory(path string) (uiapp.DirListing, error) {
 	return a.core.ListDirectory(path)
 }
 
+// ---- model manager (contract v3) -----------------------------------------
+
+func (a *App) PullModel(req uiapp.PullModelRequest) (uiapp.ModelPullState, error) {
+	return a.core.PullModel(req)
+}
+
+func (a *App) CancelPull(modelID string) bool { return a.core.CancelPull(modelID) }
+
+func (a *App) RemoveModel(modelID string) error { return a.core.RemoveModel(modelID) }
+
+func (a *App) ImportModel(req uiapp.ImportModelRequest) (uiapp.ModelInfo, error) {
+	return a.core.ImportModel(req)
+}
+
+func (a *App) SelfTestModel(modelID string) uiapp.ModelSelfTest {
+	return a.core.SelfTestModel(modelID, true)
+}
+
+func (a *App) GetModelDiagnostics(modelID string) uiapp.ModelDiagnostics {
+	return a.core.GetModelDiagnostics(modelID)
+}
+
+// ---- acceleration (contract v3) ------------------------------------------
+
+func (a *App) GetAccelStatus() uiapp.AccelStatus { return a.core.GetAccelStatus() }
+
+func (a *App) SetAccelMode(mode string) (uiapp.AccelStatus, error) {
+	return a.core.SetAccelMode(mode)
+}
+
 // ---- desktop-only native dialogs -----------------------------------------
 
 // PickImages opens the native multi-file picker (browser mode uses ListDirectory).
@@ -106,6 +136,25 @@ func (a *App) PickOutputDir() string {
 		return ""
 	}
 	return dir
+}
+
+// PickModelFile opens the native single-file picker used by the model import
+// dialog. Browser mode returns "" and the UI uses ListDirectory instead.
+func (a *App) PickModelFile() string {
+	if a.ctx == nil {
+		return ""
+	}
+	file, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "选择 ONNX 模型文件",
+		Filters: []wailsruntime.FileFilter{{
+			DisplayName: "ONNX 模型 (*.onnx;*.xml)",
+			Pattern:     "*.onnx;*.xml",
+		}},
+	})
+	if err != nil {
+		return ""
+	}
+	return file
 }
 
 var _ = os.Getenv

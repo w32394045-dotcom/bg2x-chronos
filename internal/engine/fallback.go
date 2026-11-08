@@ -30,6 +30,7 @@ func newFallbackEngine(cfg Config) Engine {
 func (e *fallbackEngine) Info() Info {
 	return Info{
 		Backend:    "go-lanczos",
+		EP:         "CPU",
 		Device:     "CPU",
 		Detail:     "pure Go fallback: tiled Lanczos3 (no AI model; build with the chronos_native tag for the C++ core)",
 		ABIVersion: 0,

@@ -431,6 +431,53 @@ func (s *Server) dispatch(method string, args []json.RawMessage) (any, error) {
 		return s.core.PickImages(), nil
 	case "PickOutputDir":
 		return s.core.PickOutputDir(), nil
+	case "PickModelFile":
+		// Browser mode has no native dialog: the UI falls back to ListDirectory.
+		return s.core.PickModelFile(), nil
+	case "PullModel":
+		var req uiapp.PullModelRequest
+		if err := decodeArg(args, 0, &req); err != nil {
+			return nil, err
+		}
+		return s.core.PullModel(req)
+	case "CancelPull":
+		var id string
+		if err := decodeArg(args, 0, &id); err != nil {
+			return nil, err
+		}
+		return s.core.CancelPull(id), nil
+	case "RemoveModel":
+		var id string
+		if err := decodeArg(args, 0, &id); err != nil {
+			return nil, err
+		}
+		return nil, s.core.RemoveModel(id)
+	case "ImportModel":
+		var req uiapp.ImportModelRequest
+		if err := decodeArg(args, 0, &req); err != nil {
+			return nil, err
+		}
+		return s.core.ImportModel(req)
+	case "SelfTestModel":
+		var id string
+		if err := decodeArg(args, 0, &id); err != nil {
+			return nil, err
+		}
+		return s.core.SelfTestModel(id, true), nil
+	case "GetModelDiagnostics":
+		var id string
+		if err := decodeArg(args, 0, &id); err != nil {
+			return nil, err
+		}
+		return s.core.GetModelDiagnostics(id), nil
+	case "GetAccelStatus":
+		return s.core.GetAccelStatus(), nil
+	case "SetAccelMode":
+		var mode string
+		if err := decodeArg(args, 0, &mode); err != nil {
+			return nil, err
+		}
+		return s.core.SetAccelMode(mode)
 	case "Reveal":
 		var p string
 		if err := decodeArg(args, 0, &p); err != nil {

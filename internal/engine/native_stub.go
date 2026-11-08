@@ -7,3 +7,6 @@ package engine
 func newNativeEngine(Config) (Engine, error) {
 	return nil, ErrNativeUnavailable
 }
+
+// runtimeProbe reports no native capabilities when the C++ core is absent.
+func runtimeProbe() Probe { return Probe{} }

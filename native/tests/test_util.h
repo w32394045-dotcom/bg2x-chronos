@@ -12,15 +12,55 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "harness.h"
 
 namespace chronos_test {
 
-/* Files land in the ctest working directory (the build tree). */
-inline std::string temp_path(const std::string& name) { return "chronos_test_" + name; }
+/*
+ * Scratch directory for every test file.
+ *
+ * ctest exports CHRONOS_TEST_TMPDIR (a directory outside the working tree) so
+ * the CLI hand-off test can pass one PNG between two processes. A manually run
+ * test binary falls back to a per-process directory below the system temp dir,
+ * so a test can never drop artifacts into the repository working tree.
+ */
+inline std::string temp_directory() {
+  static const std::string directory = []() {
+    std::string directory_path;
+    if (const char* environment = std::getenv("CHRONOS_TEST_TMPDIR");
+        environment != nullptr && *environment != '\0') {
+      directory_path = environment;
+    } else {
+      std::error_code error;
+      const std::filesystem::path system_temp = std::filesystem::temp_directory_path(error);
+      const std::string base = error ? std::string(".") : system_temp.string();
+#if defined(_WIN32)
+      const long process_id = static_cast<long>(::_getpid());
+#else
+      const long process_id = static_cast<long>(::getpid());
+#endif
+      directory_path = base + "/chronos_native_tests/run_" + std::to_string(process_id);
+    }
+    std::error_code create_error;
+    std::filesystem::create_directories(directory_path, create_error);
+    return directory_path;
+  }();
+  return directory;
+}
+
+/* Absolute path of a test file; see temp_directory(). */
+inline std::string temp_path(const std::string& name) { return temp_directory() + "/" + name; }
 
 inline chronos::Image make_gradient_rgb(int width, int height) {
   chronos::Image image;

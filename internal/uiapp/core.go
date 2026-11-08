@@ -160,6 +160,10 @@ type Core struct {
 	autoFree   bool
 	logFile    *os.File
 	started    bool
+
+	// model downloads (docs/CONTRACTS.md v3 PullModel/CancelPull)
+	pullMu sync.Mutex
+	pulls  map[string]*pullJob
 }
 
 // New creates the core. Call SetEmitter before Startup to receive the boot
@@ -272,6 +276,12 @@ func (c *Core) initialise() {
 }
 
 func (c *Core) newProvider(spec scheduler.JobSpec) (engine.Provider, error) {
+	preferCPU := false
+	c.mu.Lock()
+	if c.settings != nil {
+		preferCPU = c.settings.AccelMode == config.AccelCPU
+	}
+	c.mu.Unlock()
 	return engine.NewProvider(engine.Config{
 		ModelPath: spec.ModelPath,
 		Scale:     spec.Scale,
@@ -279,6 +289,7 @@ func (c *Core) newProvider(spec scheduler.JobSpec) (engine.Provider, error) {
 		Overlap:   spec.Overlap,
 		Threads:   spec.Threads,
 		Fast:      spec.Fast,
+		PreferCPU: preferCPU,
 	}, engine.MaxConcurrency)
 }
 
@@ -494,6 +505,10 @@ func (c *Core) PickImages() []string { return nil }
 
 // PickOutputDir is the browser-mode fallback (see PickImages).
 func (c *Core) PickOutputDir() string { return "" }
+
+// PickModelFile is the browser-mode fallback: an empty string tells the UI to
+// use the server-side ListDirectory picker instead of a native dialog.
+func (c *Core) PickModelFile() string { return "" }
 
 // ListDirectory lists one directory for the browser-mode path picker. An empty
 // path starts at the user's home directory.

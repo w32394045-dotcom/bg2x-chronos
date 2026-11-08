@@ -77,15 +77,55 @@ func (e *nativeEngine) Info() Info {
 	if n := C.chronos_session_describe(e.sess, (*C.char)(unsafe.Pointer(&buf[0])), C.int(len(buf))); n > 0 {
 		info.Detail = C.GoString((*C.char)(unsafe.Pointer(&buf[0])))
 	}
-	info.Device = "CPU"
-	switch info.Backend {
-	case "openvino":
-		info.Device = "AUTO"
+	// describe() is "backend/ep", e.g. "ort/CPU" or "openvino/GPU.0".
+	if be, ep := BackendFromDescribe(info.Detail); be != "" {
+		info.Backend = be
+		info.EP = ep
+	}
+	probe := runtimeProbe()
+	if info.EP == "" {
+		device, ep, reason := PickDevice(probe, e.cfg.PreferCPU)
+		info.EP, info.Device, info.FallbackReason = ep, device, reason
+	} else if IsGPUProvider(info.EP) {
+		info.Device = "GPU"
+		info.DeviceName = info.EP
+	} else {
+		info.Device = "CPU"
+		if e.cfg.PreferCPU {
+			_, _, info.FallbackReason = PickDevice(probe, true)
+		} else {
+			info.FallbackReason = CPUFallbackReason(probe, Info{Device: "CPU"})
+		}
+	}
+	if info.Device == "" {
+		info.Device = "CPU"
+	}
+	if info.EP == "" {
+		info.EP = "CPU"
 	}
 	if info.Detail == "" {
 		info.Detail = "native core"
 	}
 	return info
+}
+
+// runtimeProbe asks the native core for its capability report. It returns the
+// zero value when the library cannot produce one (e.g. no ONNX Runtime).
+func runtimeProbe() Probe {
+	need := int(C.chronos_backend_probe(nil, 0))
+	if need <= 0 {
+		return Probe{}
+	}
+	buf := make([]byte, need+1)
+	n := C.chronos_backend_probe((*C.char)(unsafe.Pointer(&buf[0])), C.int(len(buf)))
+	if n < 0 {
+		return Probe{}
+	}
+	probe, err := ParseProbe(buf[:int(n)])
+	if err != nil {
+		return Probe{}
+	}
+	return probe
 }
 
 func (e *nativeEngine) Process(ctx context.Context, req Request) (Result, error) {
