@@ -1,4 +1,4 @@
-﻿package scheduler
+package scheduler
 
 import (
 	"context"
@@ -97,14 +97,14 @@ type jobState struct {
 	started  time.Time
 	done     chan struct{}
 
-	mu        sync.Mutex
-	total     int
-	pending   int
-	completed int
-	failed    int
+	mu             sync.Mutex
+	total          int
+	pending        int
+	completed      int
+	failed         int
 	cancelledCount int
-	cancelled bool
-	sumSent   bool
+	cancelled      bool
+	sumSent        bool
 }
 
 // Manager owns the dynamic worker-pool: a fixed number of goroutines is not

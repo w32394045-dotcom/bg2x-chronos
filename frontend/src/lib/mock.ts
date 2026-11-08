@@ -9,6 +9,8 @@ import type {
   AppInfo,
   BatchRequest,
   BatchResult,
+  DirEntry,
+  DirListing,
   InhibitRequest,
   InhibitStatus,
   JobSummary,
@@ -93,6 +95,67 @@ const SAMPLE_MODELS: ModelInfo[] = [
 
 const MOCK_PICTURES = ['C:\\Users\\Public\\Pictures']
 
+/* ------------------------------------------- 模拟文件系统（PathPicker 浏览器预览用） */
+
+const MOCK_HOME: string = MOCK_PICTURES[0]
+const MOCK_SCENERY = `${MOCK_HOME}\\风景`
+const MOCK_PORTRAIT = `${MOCK_HOME}\\人像`
+const MOCK_CITY = `${MOCK_SCENERY}\\城市`
+
+function mockDir(name: string, path: string): DirEntry {
+  return { name, path, isDir: true, size: 0, isImage: false }
+}
+
+function mockImage(dir: string, name: string, size: number): DirEntry {
+  return { name, path: `${dir}\\${name}`, isDir: false, size, isImage: true }
+}
+
+const MOCK_TREE: Record<string, DirEntry[]> = {
+  [MOCK_HOME]: [
+    mockDir('风景', MOCK_SCENERY),
+    mockDir('人像', MOCK_PORTRAIT),
+    mockImage(MOCK_HOME, 'chronos-sample-01.jpg', 2_411_520),
+    mockImage(MOCK_HOME, 'chronos-sample-02.jpg', 3_145_728),
+    mockImage(MOCK_HOME, 'chronos-sample-03.png', 5_242_880),
+    { name: 'notes.txt', path: `${MOCK_HOME}\\notes.txt`, isDir: false, size: 1024, isImage: false },
+  ],
+  [MOCK_SCENERY]: [
+    mockDir('城市', MOCK_CITY),
+    mockImage(MOCK_SCENERY, 'landscape-01.jpg', 4_194_304),
+    mockImage(MOCK_SCENERY, 'landscape-02.jpg', 5_033_164),
+    mockImage(MOCK_SCENERY, 'landscape-03.webp', 1_572_864),
+  ],
+  [MOCK_CITY]: [
+    mockImage(MOCK_CITY, 'street-01.jpg', 3_355_443),
+    mockImage(MOCK_CITY, 'street-02.png', 4_718_592),
+  ],
+  [MOCK_PORTRAIT]: [
+    mockImage(MOCK_PORTRAIT, 'portrait-01.jpg', 2_097_152),
+    mockImage(MOCK_PORTRAIT, 'portrait-02.jpg', 2_621_440),
+  ],
+}
+
+/** Windows 风格的取父目录（盘符根返回空串，表示已到顶）。 */
+function dirnameOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  if (!trimmed) return ''
+  const idx = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'))
+  if (idx < 0) return ''
+  if (idx === 2 && /^[A-Za-z]:[\\/]/.test(trimmed)) return trimmed.slice(0, 3)
+  return trimmed.slice(0, idx)
+}
+
+/** 与 Go 侧语义一致：空入参 = home 目录；未知目录返回空列表但仍给出 parent。 */
+function mockListDirectory(path: string): DirListing {
+  const target = (path ?? '').trim() || MOCK_HOME
+  const entries = MOCK_TREE[target] ?? []
+  return {
+    path: target,
+    parent: dirnameOf(target),
+    entries: entries.map((entry) => ({ ...entry })),
+  }
+}
+
 const state = {
   concurrency: 4,
   inhibited: {
@@ -129,6 +192,8 @@ function appInfo(): AppInfo {
     outputDir: 'C:\\Users\\Public\\Chronos\\output',
     maxConcurrency: 8,
     nativeLoaded: false,
+    mode: 'desktop',
+    browseSupported: true,
   }
 }
 
@@ -455,6 +520,11 @@ export const mockApi: Api = {
   },
   async OpenDataDir() {
     emitLog('debug', '（浏览器预览）打开数据目录：C:\\Users\\Public\\Chronos')
+  },
+  async ListDirectory(path) {
+    const listing = mockListDirectory(path)
+    emitLog('debug', `（浏览器预览）枚举目录：${listing.path}（${listing.entries.length} 项）`)
+    return listing
   },
 }
 

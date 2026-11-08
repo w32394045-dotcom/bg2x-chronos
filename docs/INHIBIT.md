@@ -23,6 +23,8 @@ chronos inhibit status
 chronos inhibit on --sleep --display --lock
 chronos inhibit on --auto-release --duration 10m   # 脚本化：到时/收到信号自动释放
 chronos inhibit off
+chronos inhibit selftest --json                    # 能力自检：启用→采样→释放，输出 JSON
+chronos inhibit selftest --strict                  # 无能力/未持有时以非 0 退出（CI 用）
 ```
 
 - 任一 flag 为真即视为"请求抑制"；`inhibit off` 等价于 `Set({})`，立即释放。
@@ -31,11 +33,15 @@ chronos inhibit off
 - `--auto-release` 只是把 `InhibitRequest.autoRelease` 置位（契约 §3.2）；真正的
   "任务结束自动释放"由 app 层在 job 结束时调用 `Set({})` 并推送 `chronos:inhibit`。
   命令行自身则一直持有，直到 `--duration` 到期、Ctrl+C 或进程退出。
+- `selftest` 会以 `sleep+display+lock` 全量请求一次，采样 1.5 秒，再释放，然后输出
+  自检结果（JSON 字段：`ok / driver / platform / detail / supported / held / active /
+  released / heldSamples / startError / releaseError`）。默认即使平台不支持也返回
+  退出码 0（只报告），`--strict` 才把 `ok=false` 变成失败，适合本地/CI 判定。
 - UI 的抑制卡片显示 `active / sleep / display / lock / driver / sinceMs / detail`，
   不支持的能力置灰并展示 `detail` 的原因。
 
-> 命令行具体 flag（含 `--sleep/--display/--lock/--auto-release/--duration/--reason/--json`）
-> 以 `cmd/chronos --help` 为准；本文描述的是行为契约。
+> 命令行具体 flag（含 `--sleep/--display/--lock/--auto-release/--duration/--reason/
+> --json/--strict`）以 `cmd/chronos --help` 为准；本文描述的是行为契约。
 
 ## 3. 状态与语义
 
@@ -136,8 +142,22 @@ macOS 尚未构建支持。`driver_other.go`（`!windows && !linux`）返回一�
 
 - 单元测试：`internal/inhibit/inhibit_test.go` 用假 Driver 覆盖状态机、部分能力、
   失败回落、幂等 Stop；不触碰真实 OS API。
+- 能力自检（无需跑完整任务）：
+
+  ```bash
+  chronos inhibit selftest --json      # 报告 ok/driver/supported/held/released
+  chronos inhibit selftest --strict    # 无能力时退出码非 0
+  ```
+
+- **CI 的边界**：GitHub Actions 的 runner 没有真实桌面会话（ubuntu 是 headless
+  container，Windows runner 是服务会话），因此 CI 只跑单元测试，**不**调用
+  `inhibit selftest --strict`（headless 下必然没有抑制能力，会误报失败）。真实
+  抑制能力必须在带桌面会话的机器上手动验收：`selftest --json` + `powercfg /requests`
+  （Windows）/ `systemd-inhibit --list`（Linux）。CI 的 `browser-smoke` 与此无关，
+  它只验证 HTTP 层。
 - 手动验证（Windows）：
   ```powershell
+  chronos inhibit selftest --json
   chronos inhibit on --sleep --display --lock
   chronos inhibit status          # active=true, driver=windows-execution-state
   powercfg /requests              # 应能看到 Chronos 的 EXECUTION 请求
@@ -146,6 +166,7 @@ macOS 尚未构建支持。`driver_other.go`（`!windows && !linux`）返回一�
   ```
 - 手动验证（Linux）：
   ```bash
+  chronos inhibit selftest --json
   chronos inhibit on --sleep --display --lock
   systemd-inhibit --list | grep -i chronos
   chronos inhibit status

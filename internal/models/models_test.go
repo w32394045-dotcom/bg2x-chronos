@@ -4,10 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"strconv"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )

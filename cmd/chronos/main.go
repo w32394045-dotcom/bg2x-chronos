@@ -1,4 +1,4 @@
-﻿// Command chronos is the headless companion to the desktop app. It shares the
+// Command chronos is the headless companion to the desktop app. It shares the
 // exact same engine/scheduler configuration so CI can verify the pipeline on a
 // machine without a webview.
 package main
@@ -20,10 +20,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/w32394045-dotcom/bg2x-chronos/internal/browser"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/config"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/engine"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/inhibit"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/models"
+	"github.com/w32394045-dotcom/bg2x-chronos/internal/uiapp"
 )
 
 // Set with -ldflags "-X main.version=... -X main.commit=... -X main.buildTime=..."
@@ -55,6 +57,8 @@ func main() {
 		err = runInhibit(ctx, os.Args[2:])
 	case "bench":
 		err = runBench(ctx, os.Args[2:])
+	case "serve":
+		err = runServe(ctx, os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Printf("chronos %s (%s/%s, commit %s, built %s)\n", version, runtime.GOOS, runtime.GOARCH, commit, buildTime)
 	case "help", "--help", "-h":
@@ -454,6 +458,7 @@ func runInhibit(ctx context.Context, args []string) error {
 	duration := fs.Duration("duration", 0, "auto release after this duration (on only)")
 	reason := fs.String("reason", "Chronos CLI", "human readable reason")
 	jsonOut := fs.Bool("json", false, "json status output")
+	strict := fs.Bool("strict", false, "selftest: exit non-zero when inhibition could not be held")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -476,6 +481,54 @@ func runInhibit(ctx context.Context, args []string) error {
 			return err
 		}
 		fmt.Println("inhibition released")
+		return nil
+	case "selftest":
+		req := inhibit.Options{Sleep: true, Display: true, Lock: true, Reason: "chronos inhibit selftest"}
+		var startErr error
+		st, err := m.Set(req)
+		if err != nil {
+			startErr = err
+		}
+		heldSamples := 0
+		deadline := time.Now().Add(1500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if m.Status().Active {
+				heldSamples++
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
+		active := m.Status()
+		_, releaseErr := m.Set(inhibit.Options{})
+		released := m.Status()
+		ok := startErr == nil && active.Active && !released.Active
+		supported := map[string]bool{"sleep": st.SleepSupported, "display": st.DisplaySupported, "lock": st.LockSupported}
+		held := map[string]bool{"sleep": active.Sleep, "display": active.Display, "lock": active.Lock}
+		payload := map[string]any{
+			"ok":           ok,
+			"driver":       active.Driver,
+			"platform":     runtime.GOOS,
+			"detail":       active.Detail,
+			"supported":    supported,
+			"held":         held,
+			"active":       active.Active,
+			"released":     !released.Active,
+			"heldSamples":  heldSamples,
+			"startError":   errString(startErr),
+			"releaseError": errString(releaseErr),
+		}
+		if *jsonOut {
+			if err := json.NewEncoder(os.Stdout).Encode(payload); err != nil {
+				return err
+			}
+		} else {
+			fmt.Printf("ok=%v driver=%s active=%v released=%v\n", ok, active.Driver, active.Active, !released.Active)
+			fmt.Printf("supported: sleep=%v display=%v lock=%v\n", supported["sleep"], supported["display"], supported["lock"])
+			fmt.Printf("held:      sleep=%v display=%v lock=%v\n", held["sleep"], held["display"], held["lock"])
+			fmt.Printf("detail:    %s\n", active.Detail)
+		}
+		if *strict && !ok {
+			return fmt.Errorf("inhibit selftest failed (driver=%s startError=%v)", active.Driver, startErr)
+		}
 		return nil
 	case "on":
 		if !*sleep && !*display && !*lock {
@@ -564,6 +617,39 @@ func runBench(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("average: %dms\n", (total / time.Duration(*iters)).Milliseconds())
 	return nil
+}
+
+func runServe(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", "127.0.0.1", "listen address (loopback only by default)")
+	port := fs.Int("port", 0, "listen port (0 = random free port)")
+	noOpen := fs.Bool("no-open", false, "do not open the system browser")
+	jsonOut := fs.Bool("json", false, "print one JSON startup line on stdout")
+	assetsDir := fs.String("assets", "", "frontend dist directory (default: auto-detect)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ui, dir, err := browser.ResolveAssets(*assetsDir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "assets: %s\n", dir)
+	core := uiapp.New(uiapp.BuildInfo{Version: version, Commit: commit, BuildTime: buildTime})
+	defer core.Shutdown()
+	return browser.Run(ctx, core, browser.Options{
+		Addr:   *addr,
+		Port:   *port,
+		Open:   !*noOpen,
+		JSON:   *jsonOut,
+		Assets: ui,
+	})
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func firstNonEmpty(values ...string) string {

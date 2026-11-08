@@ -4,9 +4,12 @@
 #   * push of a tag matching v*  (e.g. git tag v0.2.0 && git push origin v0.2.0)
 #   * workflow_dispatch with an explicit version input (no tag required)
 #
-# Both desktop bundles are built from source, checksummed, and attached to the
-# GitHub Release: chronos-<ver>-linux-amd64.deb, .tar.gz and
-# chronos-<ver>-windows-amd64.zip plus SHA256SUMS.
+# Assets built from source and attached to the GitHub Release:
+#   * chronos-<ver>-linux-amd64.deb              desktop app (Wails/WebKit)
+#   * chronos-<ver>-linux-amd64.tar.gz           portable desktop bundle
+#   * chronos-<ver>-linux-amd64-web.tar.gz       browser mode (headless CLI + web/)
+#   * chronos-<ver>-windows-amd64.zip            desktop exe + chronos-cli.exe + web/
+#   * SHA256SUMS                                 combined checksums
 
 name: Release
 
@@ -122,12 +125,22 @@ jobs:
           wails build -clean -tags "webkit2_41 chronos_native" \
             -ldflags "-X main.version=${VERSION}"
 
-      - name: Package .deb + .tar.gz
+      # Browser-mode CLI (no Wails/GTK). Built after the frontend build so its
+      # assets exist for the web tarball (web/) and for `serve`.
+      - name: Build browser-mode CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli ./cmd/chronos
+          ls -l build/bin/chronos-cli
+
+      - name: Package web tarball + .deb + .tar.gz
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist-packages
-          VERSION="${VERSION}" OUT_DIR=dist-packages bash scripts/package-linux.sh
+          VERSION="${VERSION}" OUT_DIR=dist-packages WEB_BIN=build/bin/chronos-cli \
+            DIST_DIR=frontend/dist bash scripts/package-linux.sh
 
       - uses: actions/upload-artifact@v4
         with:
@@ -222,16 +235,40 @@ jobs:
           wails build -clean -tags "chronos_native" -platform windows/amd64 \
             -ldflags "-X main.version=${VERSION}"
 
+      - name: Build browser-mode CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli.exe ./cmd/chronos
+          ls -l build/bin/chronos-cli.exe
+
       - name: Package .zip
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $stage = "dist-packages\chronos-$env:VERSION-windows-amd64"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          $exe = Get-ChildItem -Path build/bin -Filter *.exe -ErrorAction SilentlyContinue |
-            Sort-Object Length -Descending | Select-Object -First 1
+          $exe = Get-ChildItem -Path build/bin -Filter chronos.exe -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path build/bin -Filter *.exe -ErrorAction SilentlyContinue |
+              Sort-Object Length -Descending | Select-Object -First 1
+          }
           if (-not $exe) { throw "wails output not found under build/bin" }
           Copy-Item $exe.FullName (Join-Path $stage "chronos.exe")
+          # Browser mode fallback: headless CLI + double-click launcher + web UI.
+          Copy-Item build/bin/chronos-cli.exe $stage
+          Set-Content -Path (Join-Path $stage "chronos-web.cmd") -Encoding ascii -Value @(
+            "@echo off",
+            "setlocal",
+            'cd /d "%~dp0"',
+            '"%~dp0chronos-cli.exe" serve --open %*'
+          )
+          if (-not (Test-Path -Path "frontend/dist/index.html")) {
+            throw "frontend/dist/index.html missing; the frontend build must run before packaging"
+          }
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "web") | Out-Null
+          Copy-Item -Path "frontend/dist/*" -Destination (Join-Path $stage "web") -Recurse -Force
           Copy-Item native/build/chronos.dll $stage
           New-Item -ItemType Directory -Force -Path (Join-Path $stage "models") | Out-Null
           Copy-Item internal/models/registry.json (Join-Path $stage "models")
@@ -272,6 +309,23 @@ jobs:
         with:
           name: chronos-windows
           path: dist
+
+      - name: Verify expected assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "dist/chronos_${VERSION}_amd64.deb"
+            "dist/chronos-${VERSION}-linux-amd64.tar.gz"
+            "dist/chronos-${VERSION}-linux-amd64-web.tar.gz"
+            "dist/chronos-${VERSION}-windows-amd64.zip"
+          )
+          for f in "${expected[@]}"; do
+            test -f "$f" || { echo "::error::missing release asset: $f"; ls -l dist; exit 1; }
+            echo "found $f"
+          done
 
       - name: Build combined SHA256SUMS
         shell: bash

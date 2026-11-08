@@ -10,7 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (event: 'toggle-settings'): void }>()
 
-const { appInfo, engineLabel, isDesktopMode } = props.store
+const { appInfo, engineLabel, browserMode, previewMode } = props.store
 
 const version = computed(() => appInfo.value?.version || '0.1.0')
 const engineTone = computed(() => {
@@ -45,7 +45,15 @@ const engineTone = computed(() => {
 
     <div class="flex shrink-0 items-center gap-2">
       <span
-        v-if="!isDesktopMode"
+        v-if="browserMode"
+        class="chip bg-sky-500/10 text-sky-300 ring-sky-400/25"
+        title="浏览器模式：页面由本地 Go 服务提供（POST /api + SSE），不依赖 WebView2 / WebKit"
+      >
+        <Icon name="external" :size="10" />
+        浏览器模式
+      </span>
+      <span
+        v-else-if="previewMode"
         class="chip bg-amber-500/10 text-amber-300 ring-amber-400/25"
         title="浏览器预览模式：所有数据来自本地 mock，不会真正推理"
       >

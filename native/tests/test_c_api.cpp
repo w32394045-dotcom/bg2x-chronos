@@ -1,5 +1,5 @@
 ﻿/*
- * Project Chronos 鈥?C ABI tests.
+ * Project Chronos - C ABI tests.
  *
  * Covers: ABI/version/backend introspection, thread-local last_error, option
  * validation, session lifecycle, process success and every documented error

@@ -3,7 +3,8 @@
 > 最后更新：2026-11-08。工作流文件：
 > [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)、
 > [`release.yml`](../.github/workflows/release.yml)、
-> [`openvino.yml`](../.github/workflows/openvino.yml)。
+> [`openvino.yml`](../.github/workflows/openvino.yml)；浏览器模式见
+> [BROWSER.md](BROWSER.md)。
 
 ## 1. 触发与并发
 
@@ -20,19 +21,20 @@ CI 的 concurrency 为 `ci-<workflow>-<ref>`，`cancel-in-progress: true`：同�
 ## 2. Job 图与依赖
 
 ```
-native-linux (ubuntu)  ──┐
-                         ├──► native-integration (ubuntu + windows)
-native-windows (win)   ──┘            │
-go (ubuntu + windows) ────────────────┼──► package (linux + windows)   [main push / dispatch]
-frontend (ubuntu) ────────────────────┘
+native-linux (ubuntu)  ─┐
+                        ├──► native-integration (ubuntu + windows) ──┐
+native-windows (win)   ─┘    cgo tests / CLI smoke / browser smoke    │
+frontend (ubuntu) ────────────────────────────────────────────────────┼──► package
+go (ubuntu + windows) ────────────────────────────────────────────────┘   [main push / dispatch]
 ```
 
 - `package` 依赖前面所有 job；任何一个失败都不会出包（发布产物必须来自全绿构建）。
-- `native-integration` 依赖两个 native job，确保 cgo 测试拿到对应平台的二进制。
+- `native-integration` 依赖两个 native job 和 frontend：cgo 测试需要对应平台的二进制，
+  Linux 的浏览器模式冒烟还需要 `frontend-dist` artifact（`chronos serve` 从磁盘加载 UI）。
 - 所有 job 都 `actions/checkout@v4` + `actions/setup-go@v5`（`go-version-file: go.mod`，
   `cache: false`——本项目依赖规模小，关闭缓存避免 `go.sum` 缺失时 setup-go 直接失败）。
-- 前端 job 使用 `pnpm/action-setup@v4`（version 11，与 `frontend/package.json` 的
-  `packageManager: pnpm@11.28.5` 对齐）+ `setup-node@v4`（Node 20，pnpm cache）。
+- 前端 job 使用 `pnpm/action-setup@v4`（version 11.28.5，与 `frontend/package.json` 的
+  `packageManager: pnpm@11.28.5` 对齐）+ `setup-node@v4`（Node 22，pnpm cache）。
 
 ## 3. 各 Job 做什么
 
@@ -117,10 +119,22 @@ go test ./... -count=1
    Windows 对应 `go build -tags chronos_native -o chronos.exe ./cmd/chronos` +
    `pwsh -File scripts/windows-smoke.ps1 -CliPath .\chronos.exe`。
 
-冒烟脚本不下载任何模型：用 python 标准库（zlib+struct）现场生成 64×48 RGB PNG，
-`chronos upscale -i in.png -o out.png -s 2 --no-model` 后解析输出 PNG 的 IHDR，断言
-128×96；再检查 `chronos inhibit status` 退出码为 0、`chronos info` 输出
-`engine: <stub|openvino|go-lanczos>` 的 backend 行。
+4. **浏览器模式冒烟（仅 ubuntu）**：下载 `frontend-dist` artifact，然后：
+
+   ```bash
+   # 脚本会自己 start/kill `chronos serve --no-open --port 0 --json`
+   CHRONOS_ASSETS_DIR="$PWD/frontend-dist" bash scripts/browser-smoke.sh ./chronos
+   ```
+
+   脚本检查：JSON 启动行里的 `http://127.0.0.1:<port>/`、`GET /` 返回 200 且注入
+   `window.__CHRONOS_HTTP__=true`、`POST /api/GetAppInfo` 返回 `"mode":"browser"`、
+   `POST /api/ListDirectory` 返回 HTTP 200、SIGTERM 后进程退出。cookie 用 `GET /`
+   获取（`SameSite=Strict`，`HttpOnly`），每个 API 调用带 cookie + `Origin`。
+
+   冒烟脚本不下载任何模型：另一条冒烟用 python 标准库（zlib+struct）现场生成 64×48
+   RGB PNG，`chronos upscale -i in.png -o out.png -s 2 --no-model` 后解析输出 PNG 的
+   IHDR，断言 128×96；再检查 `chronos inhibit status` 退出码为 0、`chronos info` 输出
+   `engine: <stub|openvino|go-lanczos>` 的 backend 行。
 
 ### 3.5 `frontend`（ubuntu-latest）
 
@@ -147,7 +161,10 @@ cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BU
 cmake --build native/build --parallel
 cd frontend && pnpm install --frozen-lockfile && cd ..
 wails build -clean -tags "webkit2_41 chronos_native" -ldflags "-X main.version=${VERSION}"
-VERSION=0.1.0 OUT_DIR=dist-packages bash scripts/package-linux.sh
+# 浏览器模式 CLI（无 GTK/WebView），产物与前端构建都在 build/bin + frontend/dist
+CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli ./cmd/chronos
+VERSION=0.1.0 OUT_DIR=dist-packages WEB_BIN=build/bin/chronos-cli DIST_DIR=frontend/dist \
+  bash scripts/package-linux.sh
 ```
 
 Windows：
@@ -156,8 +173,10 @@ Windows：
 cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=OFF
 cmake --build native/build
 wails build -clean -tags "chronos_native" -platform windows/amd64 -ldflags "-X main.version=${VERSION}"
-# 组装 zip：build/bin/chronos.exe + native/build/chronos.dll + internal/models/registry.json
-#           + README.md/LICENSE（存在时）
+$env:CGO_ENABLED = "1"
+go build -tags chronos_native -o build/bin/chronos-cli.exe ./cmd/chronos
+# 组装 zip：chronos.exe + chronos-cli.exe + chronos-web.cmd + chronos.dll
+#           + web/（frontend/dist 内容）+ internal/models/registry.json + README/LICENSE
 Compress-Archive ... chronos-<ver>-windows-amd64.zip
 ```
 
@@ -169,17 +188,22 @@ Compress-Archive ... chronos-<ver>-windows-amd64.zip
 
 | artifact | 内容 |
 | --- | --- |
-| `chronos-linux` | `chronos_<ver>_amd64.deb`、`chronos-<ver>-linux-amd64.tar.gz`、`SHA256SUMS` |
-| `chronos-windows` | `chronos-<ver>-windows-amd64.zip`、`SHA256SUMS` |
+| `chronos-linux` | `chronos_<ver>_amd64.deb`、`chronos-<ver>-linux-amd64.tar.gz`、`chronos-<ver>-linux-amd64-web.tar.gz`、`SHA256SUMS` |
+| `chronos-windows` | `chronos-<ver>-windows-amd64.zip`（内含 `chronos.exe`、`chronos-cli.exe`、`chronos-web.cmd`、`web/`）、`SHA256SUMS` |
 
 打包布局：
 
-- `.tar.gz`：`chronos-<ver>-linux-amd64/{chronos, libs/libchronos.so, models/registry.json, README.md, LICENSE}`。
+- GUI `.tar.gz`：`chronos-<ver>-linux-amd64/{chronos, libs/libchronos.so, models/registry.json, README.md, LICENSE}`。
+- **浏览器模式 `.tar.gz`**（`package-linux.sh` 由 `WEB_BIN` 生成）：
+  `chronos-<ver>-linux-amd64-web/{chronos, chronos-web, web/, libs/libchronos.so, models/registry.json, README.md, LICENSE}`。
+  `web/` 是前端构建产物（`index.html` + `assets/`）：`serve` 的资产查找顺序是
+  `<exeDir>/web` → `<exeDir>/frontend/dist` → `<exeDir>/dist` → `cwd/frontend/dist` → `cwd/web`，
+  所以解压后直接运行 `./chronos-web` 或 `./chronos serve --open` 即可。
 - `.deb`：payload 在 `/opt/chronos/`（二进制 + `libs/` + `models/`），`/usr/bin/chronos`
   是导出 `LD_LIBRARY_PATH=/opt/chronos/libs` 的 wrapper，`/usr/share/applications/chronos.desktop`
   提供桌面入口。`scripts/package-linux.sh` 需要 `dpkg-deb` 与 `tar`。
-- zip：`chronos.exe` 与 `chronos.dll` 同目录（Go cgo 运行时按 exe 目录的 PATH 查找 DLL），
-  `models/registry.json` 供用户查看内置清单。
+- Windows zip：`chronos.exe`（GUI）与 `chronos-cli.exe`（浏览器模式）、`chronos.dll`
+  同目录；`web/` 是 UI 资产；`chronos-web.cmd` 双击即 `chronos-cli.exe serve --open`。
 
 ## 4. Release
 
@@ -192,10 +216,12 @@ git push origin v0.2.0          # 触发 release.yml
 
 1. `meta` job 解析版本（tag 去掉 `v`，或 dispatch 输入），输出 `version` / `tag`。
 2. `build-linux` / `build-windows` 重复 §3.6 的构建与打包，产物名带版本号。
-3. `release` job 下载两个 artifact，合并生成一个 `SHA256SUMS`，用
-   `softprops/action-gh-release@v2` 创建 Release（`generate_release_notes: true`），
-   附带 `.deb`、`.tar.gz`、`.zip`、`SHA256SUMS`；含 `-` 的版本号（如 `0.2.0-beta.1`）
-   自动标记 prerelease。工作流需要 `permissions: contents: write`。
+3. `release` job 下载两个 artifact，先用 `test -f` 校验四个预期资产（GUI
+   `.deb`/`.tar.gz`、`-web.tar.gz`、windows zip）都存在，再合并生成一个
+   `SHA256SUMS`，用 `softprops/action-gh-release@v2` 创建 Release
+   （`generate_release_notes: true`），附带 `.deb`、两个 `.tar.gz`、`.zip`、
+   `SHA256SUMS`；含 `-` 的版本号（如 `0.2.0-beta.1`）自动标记 prerelease。
+   工作流需要 `permissions: contents: write`。
 
 `wails build` 的 `-ldflags "-X main.version=<ver>"` 是版本注入约定（根包变量名
 `version`）。若 Lead 改为 ldflags 之外的方式（如 `wails.json` productVersion），
@@ -249,8 +275,14 @@ LD_LIBRARY_PATH=native/build go test -tags chronos_native ./internal/engine/... 
 CGO_ENABLED=1 go build -tags chronos_native -o chronos ./cmd/chronos
 bash scripts/ubuntu-smoke.sh ./chronos
 
+# 浏览器模式冒烟（先构建前端，或用 CHRONOS_ASSETS_DIR 指定）
+(cd frontend && pnpm install --frozen-lockfile && pnpm build)
+CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli ./cmd/chronos
+LD_LIBRARY_PATH=native/build bash scripts/browser-smoke.sh ./build/bin/chronos-cli
+
 # 发布包（需要先 wails build；dpkg-deb 来自 dpkg）
-VERSION=0.1.0 bash scripts/package-linux.sh
+VERSION=0.1.0 OUT_DIR=dist-packages WEB_BIN=build/bin/chronos-cli DIST_DIR=frontend/dist \
+  bash scripts/package-linux.sh
 ```
 
 ### Windows
@@ -275,6 +307,11 @@ $env:PATH = "$PWD\native\build;$env:PATH"
 go test -tags chronos_native ./internal/engine/... -count=1
 go build -tags chronos_native -o chronos.exe ./cmd/chronos
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows-smoke.ps1 -CliPath .\chronos.exe
+
+# 4) 浏览器模式（没有 bash 时手动验证；资产用 frontend/dist 或 zip 里的 web/）
+go build -tags chronos_native -o chronos-cli.exe ./cmd/chronos
+.\chronos-cli.exe serve --no-open --port 0 --json --assets frontend\dist
+# 浏览器访问打印出的 http://127.0.0.1:<port>/ ，Ctrl+C 结束
 ```
 
 ### Wails 桌面构建
@@ -306,10 +343,14 @@ wails build -clean -tags "chronos_native" -platform windows/amd64 -ldflags "-X m
 | 运行 CLI 报 `libchronos.so` 找不到 | `LD_LIBRARY_PATH=native/build`（CI 已设置） |
 | Windows 运行 exe 报 DLL 找不到 | `chronos.dll` 必须在 exe 同目录，或目录在 PATH 中 |
 | Windows cgo 报 `gcc: not found` | 安装 MSYS2 UCRT64 gcc / winlibs 并加入 PATH |
-| `pnpm install --frozen-lockfile` 失败 | pnpm 版本必须与 `packageManager` 一致（pnpm 11）；CI 固定 `version: 11` |
+| `pnpm install --frozen-lockfile` 失败 | pnpm 版本必须与 `packageManager` 一致（pnpm 11）；CI 固定 `version: 11.28.5` |
 | `go:embed frontend/dist` 失败 | `frontend/dist/.gitkeep` 被删；或前端构建未产出 index.html |
 | `package` job 被跳过 | 预期行为：只在 push 到 `main` 或手动 dispatch 时运行 |
 | `chronos info` 显示 `go-lanczos` | 构建时没带 `chronos_native`（或未链接原生库）；AI 模型无法加载 |
+| `chronos serve` 报 `UI assets not found` | 先构建前端；或传 `--assets frontend/dist` / 设 `CHRONOS_ASSETS_DIR`。CI 用 `frontend-dist` artifact |
+| `/api/*` 返回 401 `unauthorized` | 先 `GET /` 拿 cookie（`SameSite=Strict`）；curl 用 `-c jar` + `-b jar`，并带正确 `Origin` |
+| 浏览器模式端口被占用 | 默认 `--port 0` 随机端口；`--port N` 指定，`--addr` 固定 127.0.0.1 |
+| Windows `chronos-web.cmd` 闪退 | 确认 `chronos-cli.exe`、`chronos.dll`、`web/` 都在同一目录 |
 | UI 显示抑制 `unsupported` | 平台无驱动（macOS）或 Linux 无 systemd-inhibit/会话 D-Bus，见 `docs/INHIBIT.md` |
 
 ## 8. 与 Lead 负责文件的接口约定
@@ -326,8 +367,21 @@ wails build -clean -tags "chronos_native" -platform windows/amd64 -ldflags "-X m
   `upscale -i/--input -o/--output -s/--scale -m/--model --model-id --tile --overlap
   --threads --fast --no-model --json`、`info [--json]`、`gen`、
   `models list|pull|path|import|dir`、
-  `inhibit on|off|status --sleep --display --lock --auto-release --duration --reason --json`、
-  `bench`。冒烟脚本只用 `upscale ... --no-model`、`inhibit status`、`info` 三者。
+  `inhibit on|off|status|selftest --sleep --display --lock --auto-release --duration
+  --reason --json --strict`、
+  `serve --addr 127.0.0.1 --port 0 --no-open --json [--assets DIR]`、`bench`。
+  冒烟脚本只用 `upscale ... --no-model`、`inhibit status`、`info`、`serve` 四者。
+- 浏览器模式（`internal/browser` + `internal/uiapp`）：
+  - 启动 JSON（stdout 单行）：`{"addr":"127.0.0.1:<port>","mode":"browser","pid":N,
+    "url":"http://127.0.0.1:<port>/"}`；`assets: <dir>` 与日志走 stderr。
+  - 鉴权：`GET /` 下发 `Set-Cookie: chronos_session=<token>; HttpOnly; SameSite=Strict`；
+    `POST /api/<Method>` 与 `/events` 需要该 cookie，且若带 `Origin` 必须等于
+    `http://127.0.0.1:<port>`。请求体 `{"args":[...]}`，响应 `{"result":...}` 或
+    `{"error":"..."}`（HTTP 200）。
+  - 事件：`GET /events`（SSE，`data: {"name":"chronos:progress","data":{...}}`）。
+  - UI 资产查找顺序（`internal/browser.ResolveAssets`）：`--assets` → `CHRONOS_ASSETS`
+    → `<exeDir>/web` → `<exeDir>/frontend/dist` → `<exeDir>/dist` → `cwd/frontend/dist`
+    → `cwd/web`；没有 `index.html` 就拒绝启动。
 - 原生：`native/CMakeLists.txt` 目标 `chronos`（Linux `libchronos.so` 带
   `SOVERSION 1`；Windows `chronos.dll` + `libchronos.dll.a`）、`chronos_tests`
   （ctest 套件 `native_*`）、`chronos_native_cli`；选项 `CHRONOS_WITH_OPENVINO`、
@@ -336,6 +390,7 @@ wails build -clean -tags "chronos_native" -platform windows/amd64 -ldflags "-X m
   `cgo && chronos_native` 下编译（`-L${SRCDIR}/../../native/build -lchronos`）；
   registry 单源是 `internal/models/registry.json`（`go:embed`）。
 - 前端：`frontend/package.json`（`pnpm test`、`pnpm build`）、`pnpm-lock.yaml`、
-  `frontend/dist/.gitkeep`；`packageManager` 为 pnpm 11。
+  `frontend/dist/.gitkeep`；`packageManager` 为 pnpm 11.28.5。
 - 冒烟测试用到的 CLI 行为：输出必须是 PNG（`-o` 显式 `.png` 或目录）、
-  `inhibit status` 无头环境也返回退出码 0、`info` 打印 `engine: <backend>` 行。
+  `inhibit status` 无头环境也返回退出码 0、`info` 打印 `engine: <backend>` 行、
+  `serve --json` 的 stdout 只有一行 JSON（stderr 可有日志）。

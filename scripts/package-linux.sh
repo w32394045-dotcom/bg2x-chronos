@@ -15,6 +15,9 @@
 #   ARCH         Debian architecture, default amd64
 #   OUT_DIR      output directory, default dist-packages
 #   BIN          path to the desktop binary; autodetected under build/bin
+#   WEB_BIN      path to the headless browser-mode CLI; autodetected under build/bin
+#   DIST_DIR     built frontend (index.html + assets/) copied into the web tarball
+#                as web/; default frontend/dist
 #   LIB          path to libchronos.so, default native/build/libchronos.so
 #   REGISTRY     model registry, default models/registry.json
 #
@@ -22,6 +25,16 @@
 # relative to the binary):
 #   chronos-<version>-linux-<arch>/
 #     chronos
+#     libs/libchronos.so
+#     models/registry.json
+#     README.md, LICENSE (when present)
+#
+# A second, browser-mode tarball is emitted from WEB_BIN (no GTK/WebView needed):
+#   chronos-<version>-linux-<arch>-web/
+#     chronos          headless CLI (same binary, `chronos serve`)
+#     chronos-web      launcher: exec ./chronos serve --open
+#     web/             built frontend (index.html + assets); ResolveAssets finds
+#                      <exeDir>/web first, so `./chronos serve` works as-is
 #     libs/libchronos.so
 #     models/registry.json
 #     README.md, LICENSE (when present)
@@ -72,6 +85,31 @@ if [ -z "${BIN}" ]; then
 fi
 [ -n "${BIN}" ] || fail "desktop binary not found; run 'wails build' or set BIN=..."
 [ -f "${BIN}" ] || fail "BIN does not exist: ${BIN}"
+
+# Browser-mode CLI (no GTK/WebView): `go build -tags chronos_native -o
+# build/bin/chronos-cli ./cmd/chronos`. It is shipped in its own tarball.
+WEB_BIN="${WEB_BIN:-}"
+if [ -z "${WEB_BIN}" ]; then
+  for candidate in build/bin/chronos-cli build/bin/chronos-cli.exe; do
+    if [ -f "${candidate}" ] && [ -x "${candidate}" ]; then
+      WEB_BIN="${candidate}"
+      break
+    fi
+  done
+fi
+[ -n "${WEB_BIN}" ] || fail "browser-mode CLI not found; build it with 'go build -tags chronos_native -o build/bin/chronos-cli ./cmd/chronos' or set WEB_BIN=..."
+[ -f "${WEB_BIN}" ] || fail "WEB_BIN does not exist: ${WEB_BIN}"
+
+# Built frontend for browser mode: the CLI looks for <exeDir>/web first.
+DIST_DIR="${DIST_DIR:-}"
+if [ -z "${DIST_DIR}" ] && [ -f "frontend/dist/index.html" ]; then
+  DIST_DIR="frontend/dist"
+fi
+if [ -z "${DIST_DIR}" ]; then
+  fail "frontend build not found (expected frontend/dist/index.html); run 'cd frontend && pnpm build' or set DIST_DIR=..."
+fi
+[ -f "${DIST_DIR}/index.html" ] || fail "DIST_DIR has no index.html: ${DIST_DIR}"
+
 [ -f "${LIB}" ] || fail "native library not found: ${LIB} (build native/build first)"
 [ -n "${REGISTRY}" ] || fail "model registry not found (expected internal/models/registry.json)"
 [ -f "${REGISTRY}" ] || fail "model registry not found: ${REGISTRY}"
@@ -80,6 +118,7 @@ log "version=${VERSION} arch=${ARCH} bin=${BIN} lib=${LIB}"
 
 mkdir -p "${OUT_DIR}"
 TARBALL="chronos-${VERSION}-linux-${ARCH}.tar.gz"
+WEB_TARBALL="chronos-${VERSION}-linux-${ARCH}-web.tar.gz"
 DEB="chronos_${VERSION}_${ARCH}.deb"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "${STAGE}"' EXIT
@@ -97,6 +136,37 @@ done
 
 log "creating ${OUT_DIR}/${TARBALL}"
 tar -C "${STAGE}" -czf "${OUT_DIR}/${TARBALL}" "${TARBALL%.tar.gz}"
+
+# --- browser-mode tarball ---------------------------------------------------
+# Same native library and model registry, but the entry point is the headless
+# CLI: `chronos serve --open` serves the embedded UI over 127.0.0.1. No GTK or
+# WebView runtime is required, so this is the fallback for Linux boxes without
+# WebKitGTK (and for CI where no display server exists).
+WEB_ROOT="${STAGE}/${WEB_TARBALL%.tar.gz}"
+mkdir -p "${WEB_ROOT}/libs" "${WEB_ROOT}/models" "${WEB_ROOT}/web"
+install -m 0755 "${WEB_BIN}" "${WEB_ROOT}/chronos"
+install -m 0644 "${LIB}" "${WEB_ROOT}/libs/libchronos.so"
+install -m 0644 "${REGISTRY}" "${WEB_ROOT}/models/registry.json"
+cp -R "${DIST_DIR}/." "${WEB_ROOT}/web/"
+for extra in README.md LICENSE; do
+  if [ -f "${extra}" ]; then
+    install -m 0644 "${extra}" "${WEB_ROOT}/${extra}"
+  fi
+done
+cat > "${WEB_ROOT}/chronos-web" <<'LAUNCHER'
+#!/bin/sh
+# Chronos browser mode: serve the UI on 127.0.0.1 and open the default browser.
+# The CLI links libchronos.so from libs/ (no rpath), so export the library path.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+LD_LIBRARY_PATH="${here}/libs${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LD_LIBRARY_PATH
+cd "${here}" || exit 1
+exec ./chronos serve --open "$@"
+LAUNCHER
+chmod 0755 "${WEB_ROOT}/chronos-web"
+
+log "creating ${OUT_DIR}/${WEB_TARBALL}"
+tar -C "${STAGE}" -czf "${OUT_DIR}/${WEB_TARBALL}" "${WEB_TARBALL%.tar.gz}"
 
 # --- .deb -------------------------------------------------------------------
 DEB_ROOT="${STAGE}/deb"
@@ -164,10 +234,10 @@ dpkg-deb --build --root-owner-group "${DEB_ROOT}" "${OUT_DIR}/${DEB}" >/dev/null
 if command -v sha256sum >/dev/null 2>&1; then
   (
     cd "${OUT_DIR}"
-    sha256sum "${DEB}" "${TARBALL}" > SHA256SUMS
+    sha256sum "${DEB}" "${TARBALL}" "${WEB_TARBALL}" > SHA256SUMS
     cat SHA256SUMS
   )
 fi
 
 log "done:"
-ls -lh "${OUT_DIR}/${DEB}" "${OUT_DIR}/${TARBALL}"
+ls -lh "${OUT_DIR}/${DEB}" "${OUT_DIR}/${TARBALL}" "${OUT_DIR}/${WEB_TARBALL}"

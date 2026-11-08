@@ -50,6 +50,36 @@ export interface AppInfo {
   maxConcurrency: number
   /** chronos 原生库是否加载成功 */
   nativeLoaded: boolean
+  /**
+   * 运行模式（契约 §3.2 新增）：
+   * - `desktop`：Wails webview 内嵌运行
+   * - `browser`：由 `chronos serve` 的本地 HTTP 服务提供页面
+   * 旧二进制可能不返回该字段；前端按实际 transport 兜底（§6 字段只增不删）。
+   */
+  mode?: 'desktop' | 'browser' | (string & {})
+  /** Go 是否提供 ListDirectory —— 浏览器模式的服务端路径选择器依赖它 */
+  browseSupported?: boolean
+}
+
+/** 服务端目录枚举的一行（契约 §3.2 DirListing.entries）。 */
+export interface DirEntry {
+  name: string
+  /** 绝对路径，可直接回传给 Go */
+  path: string
+  isDir: boolean
+  /** 字节数；目录为 0 */
+  size: number
+  /** Go 侧识别的图片扩展名（png / jpg / jpeg / webp / bmp / ...） */
+  isImage: boolean
+}
+
+/** ListDirectory 返回值：浏览器模式下 PathPicker 的唯一数据源。 */
+export interface DirListing {
+  /** 实际枚举的目录（空入参时由 Go 解析为 home 目录） */
+  path: string
+  /** 上一级目录；已到根时为空串 */
+  parent: string
+  entries: DirEntry[]
 }
 
 export interface ModelInfo {

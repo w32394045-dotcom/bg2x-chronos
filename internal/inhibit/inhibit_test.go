@@ -1,4 +1,4 @@
-﻿package inhibit
+package inhibit
 
 import (
 	"errors"
@@ -24,7 +24,7 @@ func (f *fakeDriver) Name() string {
 	}
 	return f.name
 }
-func (f *fakeDriver) Detail() string          { return f.detail }
+func (f *fakeDriver) Detail() string             { return f.detail }
 func (f *fakeDriver) Capabilities() Capabilities { return f.caps }
 func (f *fakeDriver) Start(o Options) error {
 	if f.panicNext {

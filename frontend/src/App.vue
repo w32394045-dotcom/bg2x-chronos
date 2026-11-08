@@ -11,12 +11,25 @@ import LogConsole from './components/LogConsole.vue'
 import StatusBar from './components/StatusBar.vue'
 import ToastHost from './components/ToastHost.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import PathPicker from './components/PathPicker.vue'
 import Icon from './components/Icon.vue'
 import { useChronos } from '@/composables/useChronos'
 
 const store = useChronos()
 // 顶层解构让模板里直接拿到 ref 的值（脚本内部仍通过 store 调用方法）
-const { compareTarget, initError, appInfo, canStart, start, closeCompare, reveal } = store
+const {
+  compareTarget,
+  initError,
+  appInfo,
+  canStart,
+  start,
+  closeCompare,
+  reveal,
+  pickerMode,
+  pickerInitialPath,
+  closePathPicker,
+  applyPickerSelection,
+} = store
 
 const settingsOpen = ref(false)
 
@@ -25,11 +38,20 @@ function closeTopLayer(): boolean {
     settingsOpen.value = false
     return true
   }
+  if (pickerMode.value) {
+    closePathPicker()
+    return true
+  }
   if (compareTarget.value) {
     closeCompare()
     return true
   }
   return false
+}
+
+/** 任意模态层打开时，Enter 不应穿透去启动任务。 */
+function modalOpen(): boolean {
+  return settingsOpen.value || pickerMode.value !== null || compareTarget.value !== null
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -51,6 +73,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey) return
   const target = event.target as HTMLElement | null
   if (isTypingTarget(target) || target?.tagName === 'BUTTON') return
+  if (modalOpen()) return
   if (canStart.value) {
     event.preventDefault()
     void start()
@@ -123,5 +146,13 @@ onUnmounted(() => {
     />
 
     <SettingsModal v-if="settingsOpen" :store="store" @close="settingsOpen = false" />
+
+    <PathPicker
+      v-if="pickerMode"
+      :mode="pickerMode"
+      :initial-path="pickerInitialPath"
+      @confirm="applyPickerSelection"
+      @close="closePathPicker"
+    />
   </div>
 </template>

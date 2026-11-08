@@ -5,7 +5,8 @@
  * 队列本身的可测逻辑放在 lib/queue.ts（纯函数，见 __tests__）。
  */
 import { computed, onScopeDispose, reactive, ref } from 'vue'
-import { api, isDesktop, isMockMode, onEvent } from '@/lib/api'
+import { api, getTransport, isDesktop, onEvent } from '@/lib/api'
+import type { Transport } from '@/lib/api'
 import {
   applyProgress,
   clearFinished as clearFinishedItems,
@@ -53,6 +54,22 @@ export interface CompareTarget {
   file: string
   output: string
   name: string
+}
+
+/** 服务端路径选择器模式：选图片文件 / 选输出目录。 */
+export type PickerMode = 'images' | 'output'
+
+export interface PickerSelection {
+  mode: PickerMode
+  files: string[]
+  dir: string
+}
+
+export interface ModeInfo {
+  transport: Transport
+  /** 由 AppInfo.mode 决定；缺失时按 transport 兜底 */
+  mode: 'desktop' | 'browser'
+  label: string
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -118,6 +135,12 @@ export function useChronos() {
   const recent = ref<RecentResult[]>([])
   const compareTarget = ref<CompareTarget | null>(null)
 
+  /* ------------------------------------------------------- 路径选择器（浏览器模式） */
+  /** transport 在页面加载时已确定（Go 注入标记 / Wails 绑定 / mock） */
+  const transport = getTransport()
+  const pickerMode = ref<PickerMode | null>(null)
+  const pickerInitialPath = ref('')
+
   let toastSeq = 0
   let disposed = false
   let subscribed = false
@@ -147,6 +170,40 @@ export function useChronos() {
     () => inhibitRequest.sleep || inhibitRequest.display || inhibitRequest.lock,
   )
   const isDesktopMode = isDesktop()
+
+  /**
+   * 运行模式：浏览器模式由 Go `chronos serve` 提供页面。
+   * AppInfo.mode 缺失（旧二进制）时按 transport 兜底。
+   */
+  const mode = computed<'desktop' | 'browser'>(() => {
+    const declared = appInfo.value?.mode
+    if (declared === 'browser') return 'browser'
+    if (declared === 'desktop') return 'desktop'
+    return transport === 'http' ? 'browser' : 'desktop'
+  })
+  const browserMode = computed(() => mode.value === 'browser')
+  /** vite dev 纯前端预览（无任何后端） */
+  const previewMode = computed(() => transport === 'mock')
+  /** Go 是否提供 ListDirectory（浏览器模式的路径选择器依赖） */
+  const browseSupported = computed(() => {
+    const declared = appInfo.value?.browseSupported
+    if (typeof declared === 'boolean') return declared
+    return transport === 'http'
+  })
+  /** 是否展示服务端路径选择器入口：桌面 Wails 保持原生对话框不变 */
+  const canBrowse = computed(
+    () => browseSupported.value && (browserMode.value || transport === 'mock'),
+  )
+  const modeInfo = computed<ModeInfo>(() => ({
+    transport,
+    mode: mode.value,
+    label:
+      transport === 'http'
+        ? '浏览器模式'
+        : transport === 'wails'
+          ? '桌面模式'
+          : '预览模式',
+  }))
 
   /* --------------------------------------------------------------- 日志/提示 */
   function pushLog(level: LogEvent['level'], msg: string): void {
@@ -212,7 +269,14 @@ export function useChronos() {
     if (loading.value || disposed) return
     loading.value = true
     initError.value = ''
-    pushLog('info', isDesktopMode ? 'Chronos 桌面运行时已连接' : '浏览器预览模式：使用 mock 后端')
+    pushLog(
+      'info',
+      transport === 'wails'
+        ? 'Wails 桌面运行时已连接'
+        : transport === 'http'
+          ? '浏览器模式：通过本地 HTTP 服务连接 Go 后端'
+          : '浏览器预览模式：使用 mock 后端',
+    )
     subscribeEvents()
     try {
       const [info, concurrencyValue] = await Promise.all([
@@ -321,22 +385,83 @@ export function useChronos() {
     }
   }
 
+  function openImagePicker(): void {
+    if (!browseSupported.value) {
+      toast('warn', '当前后端不支持浏览服务器目录')
+      return
+    }
+    pickerInitialPath.value = ''
+    pickerMode.value = 'images'
+  }
+
+  function openOutputPicker(): void {
+    if (!browseSupported.value) {
+      toast('warn', '当前后端不支持浏览服务器目录')
+      return
+    }
+    pickerInitialPath.value = outputDir.value
+    pickerMode.value = 'output'
+  }
+
+  function closePathPicker(): void {
+    pickerMode.value = null
+  }
+
+  /** PathPicker 确认回调：图片加入队列 / 目录写回输出目录。 */
+  function applyPickerSelection(selection: PickerSelection): void {
+    pickerMode.value = null
+    if (selection.mode === 'images') {
+      if (selection.files.length > 0) addFiles(selection.files)
+      return
+    }
+    const dir = selection.dir.trim()
+    if (dir) setOutputDir(dir)
+  }
+
+  /** 输出目录支持手动输入（浏览器模式没有原生目录对话框）。 */
+  function setOutputDir(dir: string): void {
+    outputDir.value = dir
+    if (dir) pushLog('info', `输出目录：${dir}`)
+    else pushLog('debug', '输出目录已恢复默认（与输入同目录）')
+  }
+
   async function pickImages(): Promise<void> {
+    // 浏览器模式：Go 侧 PickImages 返回空，必须用服务端路径选择器
+    if (browserMode.value && browseSupported.value) {
+      openImagePicker()
+      return
+    }
     try {
       const paths = await api.PickImages()
-      if (Array.isArray(paths) && paths.length > 0) addFiles(paths)
-      else if (paths && paths.length === 0) pushLog('debug', '未选择任何文件')
+      if (Array.isArray(paths) && paths.length > 0) {
+        addFiles(paths)
+        return
+      }
+      // 后端（例如浏览器模式的旧版）返回空数组：回退到服务端选择器
+      if (browseSupported.value) {
+        openImagePicker()
+        return
+      }
+      pushLog('debug', '未选择任何文件')
     } catch (error) {
       toast('error', `选择图片失败：${errorMessage(error)}`)
     }
   }
 
   async function pickOutputDir(): Promise<void> {
+    if (browserMode.value && browseSupported.value) {
+      openOutputPicker()
+      return
+    }
     try {
       const dir = await api.PickOutputDir()
       if (dir) {
-        outputDir.value = dir
-        pushLog('info', `输出目录：${dir}`)
+        setOutputDir(dir)
+        return
+      }
+      if (browseSupported.value) {
+        openOutputPicker()
+        return
       }
     } catch (error) {
       toast('error', `选择输出目录失败：${errorMessage(error)}`)
@@ -542,6 +667,8 @@ export function useChronos() {
     starting,
     recent,
     compareTarget,
+    pickerMode,
+    pickerInitialPath,
     // 派生
     queueSummary,
     pending,
@@ -550,7 +677,13 @@ export function useChronos() {
     engineLabel,
     anyInhibit,
     isDesktopMode,
-    isMockMode: isMockMode(),
+    transport,
+    mode,
+    modeInfo,
+    browserMode,
+    previewMode,
+    browseSupported,
+    canBrowse,
     // 方法
     init,
     dispose,
@@ -561,6 +694,11 @@ export function useChronos() {
     addFiles,
     pickImages,
     pickOutputDir,
+    openImagePicker,
+    openOutputPicker,
+    closePathPicker,
+    applyPickerSelection,
+    setOutputDir,
     removeItem,
     clearFinished,
     setConcurrency,

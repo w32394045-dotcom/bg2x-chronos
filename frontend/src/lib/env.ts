@@ -19,6 +19,7 @@ export interface WailsAppBindings {
   PickOutputDir?: (...args: unknown[]) => Promise<unknown>
   Reveal?: (...args: unknown[]) => Promise<unknown>
   OpenDataDir?: (...args: unknown[]) => Promise<unknown>
+  ListDirectory?: (...args: unknown[]) => Promise<unknown>
   [key: string]: ((...args: unknown[]) => unknown) | undefined
 }
 
@@ -33,6 +34,12 @@ declare global {
   interface Window {
     go?: { main?: { App?: WailsAppBindings } }
     runtime?: WailsRuntime
+    /**
+     * 由 Go `chronos serve` 注入到 index.html 的标记：
+     * true 时说明页面由本地 HTTP 服务提供（无 WebView2/WebKit 依赖），
+     * 前端改走 POST /api/<Method> + SSE /events。
+     */
+    __CHRONOS_HTTP__?: boolean
   }
 }
 
@@ -41,6 +48,15 @@ export function isDesktop(): boolean {
   if (typeof window === 'undefined') return false
   const app = window.go?.main?.App
   return !!app && typeof app === 'object'
+}
+
+/**
+ * 是否由 Go 本地 HTTP 服务提供页面（浏览器模式）。
+ * 契约中的检测方式：`window.__CHRONOS_HTTP__ === true`。
+ */
+export function isHttpMode(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.__CHRONOS_HTTP__ === true
 }
 
 /** Wails 注入的 App 绑定（浏览器预览时为 undefined）。 */

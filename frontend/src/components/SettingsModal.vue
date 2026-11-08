@@ -7,7 +7,7 @@ import { backendLabel } from '@/lib/labels'
 const props = defineProps<{ store: ChronosStore }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 
-const { appInfo, models, loadModels, openDataDir, isMockMode: mockMode, maxConcurrency } = props.store
+const { appInfo, models, loadModels, openDataDir, previewMode, modeInfo, browseSupported, maxConcurrency } = props.store
 
 const engine = computed(() => appInfo.value?.engine ?? null)
 const rows = computed(() => [
@@ -16,6 +16,9 @@ const rows = computed(() => [
   { label: '构建时间', value: appInfo.value?.buildTime || '—' },
   { label: 'Go', value: appInfo.value?.goVersion || '—' },
   { label: '平台', value: appInfo.value?.platform || '—' },
+  { label: '运行模式', value: modeInfo.value.label },
+  { label: '传输', value: modeInfo.value.transport.toUpperCase() },
+  { label: '目录浏览', value: browseSupported.value ? '支持（ListDirectory）' : '不支持' },
   { label: '原生库', value: appInfo.value ? (appInfo.value.nativeLoaded ? '已加载' : '未加载（回退）') : '—' },
   { label: '并发上限', value: String(maxConcurrency.value) },
   { label: '模型数量', value: String(models.value.length) },
@@ -32,7 +35,8 @@ function pathRow(label: string, value: string | undefined): { label: string; val
       <div class="flex items-center gap-2 border-b border-line-soft px-4 py-2.5">
         <Icon name="settings" :size="15" class="text-mute" />
         <span class="text-[13px] font-medium text-mute-strong">设置 / 关于</span>
-        <span v-if="mockMode" class="chip bg-amber-500/10 text-amber-300 ring-amber-400/25">浏览器预览</span>
+        <span v-if="modeInfo.transport === 'http'" class="chip bg-sky-500/10 text-sky-300 ring-sky-400/25">浏览器模式</span>
+        <span v-else-if="previewMode" class="chip bg-amber-500/10 text-amber-300 ring-amber-400/25">浏览器预览</span>
         <button type="button" class="icon-btn ml-auto" aria-label="关闭设置" title="关闭（Esc）" @click="emit('close')">
           <Icon name="close" :size="16" />
         </button>

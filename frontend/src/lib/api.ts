@@ -1,18 +1,31 @@
 /**
  * 前端唯一的后端入口（契约 §5）。
  *
- * 桌面（Wails）下每个方法都懒绑定到 `window.go.main.App.<Method>`；
- * 浏览器预览（`vite dev`）下自动降级到 mock，逐方法回退，
- * 因此即使某个绑定缺失（旧的 Wails 二进制）UI 也不会整体崩溃。
+ * 三种 transport，优先级：HTTP 标记 > Wails 绑定 > mock：
+ * - `http`：页面由 Go `chronos serve` 提供（`window.__CHRONOS_HTTP__ === true`），
+ *   走 POST /api/<Method> + SSE /events，见 `http.ts`；
+ * - `wails`：`window.go.main.App.<Method>` + `window.runtime.EventsOn`（桌面 webview）；
+ * - `mock`：`vite dev` / 无任何后端时，返回示例数据并模拟事件（见 `mock.ts`）。
+ *
+ * Wails 模式下每个方法仍逐方法回退到 mock：旧二进制缺少某个绑定时 UI 不会整体崩溃。
  */
 import { getDesktopApp, getWailsRuntime, isDesktop } from './env'
 import { normalizeEvent } from './events'
 import { mockApi } from './mock'
 import { mockSubscribe } from './eventbus'
+import {
+  createHttpApi,
+  createHttpEventBus,
+  detectTransport,
+  type HttpEventBus,
+  type HttpTransportOptions,
+  type Transport,
+} from './http'
 import type {
   AppInfo,
   BatchRequest,
   BatchResult,
+  DirListing,
   InhibitRequest,
   InhibitStatus,
   JobSummary,
@@ -22,6 +35,8 @@ import type {
 } from './types'
 
 export { isDesktop }
+export { detectTransport }
+export type { Transport }
 
 export interface Api {
   GetAppInfo(): Promise<AppInfo>
@@ -37,10 +52,12 @@ export interface Api {
   PickOutputDir(): Promise<string>
   Reveal(path: string): Promise<void>
   OpenDataDir(): Promise<void>
+  /** 浏览器模式的服务端目录枚举（空字符串 = Go 侧 home 目录）。 */
+  ListDirectory(path: string): Promise<DirListing>
 }
 
 /**
- * 方法绑定：优先真实 Wails 绑定，缺失时回退到同名 mock 实现。
+ * Wails 绑定：优先真实绑定，缺失时回退到同名 mock 实现。
  * 注意 Go 绑定方法依赖 `this`（Wails 生成的对象），必须用 apply 保留 receiver。
  */
 function bind<K extends keyof Api>(name: K): Api[K] {
@@ -52,29 +69,58 @@ function bind<K extends keyof Api>(name: K): Api[K] {
   return mockApi[name]
 }
 
-export const api: Api = {
-  GetAppInfo: bind('GetAppInfo'),
-  ListModels: bind('ListModels'),
-  RefreshModels: bind('RefreshModels'),
-  UpscaleBatch: bind('UpscaleBatch'),
-  CancelJob: bind('CancelJob'),
-  SetConcurrency: bind('SetConcurrency'),
-  GetConcurrency: bind('GetConcurrency'),
-  SetInhibit: bind('SetInhibit'),
-  GetInhibitStatus: bind('GetInhibitStatus'),
-  PickImages: bind('PickImages'),
-  PickOutputDir: bind('PickOutputDir'),
-  Reveal: bind('Reveal'),
-  OpenDataDir: bind('OpenDataDir'),
+/** 桌面（Wails）transport 的 Api 实现。 */
+export function createWailsApi(): Api {
+  return {
+    GetAppInfo: bind('GetAppInfo'),
+    ListModels: bind('ListModels'),
+    RefreshModels: bind('RefreshModels'),
+    UpscaleBatch: bind('UpscaleBatch'),
+    CancelJob: bind('CancelJob'),
+    SetConcurrency: bind('SetConcurrency'),
+    GetConcurrency: bind('GetConcurrency'),
+    SetInhibit: bind('SetInhibit'),
+    GetInhibitStatus: bind('GetInhibitStatus'),
+    PickImages: bind('PickImages'),
+    PickOutputDir: bind('PickOutputDir'),
+    Reveal: bind('Reveal'),
+    OpenDataDir: bind('OpenDataDir'),
+    ListDirectory: bind('ListDirectory'),
+  }
 }
 
-/** 当前是否运行在浏览器预览（mock）模式。 */
+/** 按 transport 构造 Api（导出便于单测注入 fetch / EventSource）。 */
+export function createApi(transport: Transport, options?: HttpTransportOptions): Api {
+  if (transport === 'http') return createHttpApi(options)
+  if (transport === 'wails') return createWailsApi()
+  return mockApi
+}
+
+export const api: Api = createApi(detectTransport())
+
+/** 当前生效的 transport（每次动态探测）。 */
+export function getTransport(): Transport {
+  return detectTransport()
+}
+
+/** 浏览器模式：由 Go 本地 HTTP 服务提供页面。 */
+export function isBrowserMode(): boolean {
+  return detectTransport() === 'http'
+}
+
+/** 纯浏览器预览（vite dev，无后端）模式。 */
 export function isMockMode(): boolean {
-  const app = getDesktopApp()
-  return !isDesktop() || typeof app?.GetAppInfo !== 'function'
+  return detectTransport() === 'mock'
 }
 
 /* ---------------------------------------------------------------- 事件订阅 */
+
+let httpBus: HttpEventBus | null = null
+
+function getHttpBus(): HttpEventBus {
+  if (!httpBus) httpBus = createHttpEventBus()
+  return httpBus
+}
 
 export function onEvent(name: 'chronos:progress', handler: (payload: ProgressEvent) => void): () => void
 export function onEvent(name: 'chronos:job', handler: (payload: JobSummary) => void): () => void
@@ -89,12 +135,17 @@ export function onEvent<T = unknown>(name: string, handler: (payload: T) => void
       // 单个 handler 抛错不能中断事件循环
     }
   }
-  const runtime = getWailsRuntime()
-  if (typeof runtime?.EventsOn === 'function') {
-    const off = runtime.EventsOn(name, deliver)
-    if (typeof off === 'function') return off
-    // 某些 Wails 版本 EventsOn 返回 void，退化为 EventsOff
-    return () => runtime.EventsOff?.(name)
+
+  const transport = detectTransport()
+  if (transport === 'http') return getHttpBus().subscribe(name, deliver)
+  if (transport === 'wails') {
+    const runtime = getWailsRuntime()
+    if (typeof runtime?.EventsOn === 'function') {
+      const off = runtime.EventsOn(name, deliver)
+      if (typeof off === 'function') return off
+      // 某些 Wails 版本 EventsOn 返回 void，退化为 EventsOff
+      return () => runtime.EventsOff?.(name)
+    }
   }
   // 浏览器预览：走本地事件总线（mock 后端会 emit 同名字段结构的事件）
   return mockSubscribe(name, deliver)

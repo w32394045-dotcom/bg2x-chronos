@@ -4,7 +4,7 @@ import Icon from './Icon.vue'
 import type { ChronosStore } from '@/composables/useChronos'
 
 const props = defineProps<{ store: ChronosStore }>()
-const { addFiles, pickImages, toast, queueSummary } = props.store
+const { addFiles, pickImages, toast, queueSummary, canBrowse, browserMode, openImagePicker } = props.store
 
 const dragging = ref(false)
 const justAdded = ref(false)
@@ -136,13 +136,28 @@ onUnmounted(() => {
           {{ dragging ? '松开鼠标即可加入队列' : '拖拽图片到这里，或点击选择' }}
         </p>
         <p class="mt-0.5 truncate text-[11px] text-mute-soft">
-          支持 PNG / JPEG / WebP / BMP · 只传递文件路径，不读取像素 · 可粘贴文件路径
+          {{
+            browserMode
+              ? '点击选择将打开服务端目录选择器 · 只传递文件路径，不读取像素'
+              : '支持 PNG / JPEG / WebP / BMP · 只传递文件路径，不读取像素 · 可粘贴文件路径'
+          }}
         </p>
       </div>
       <div class="hidden shrink-0 items-center gap-1.5 sm:flex">
         <span v-if="queueSummary.total > 0" class="chip bg-white/5 text-mute ring-white/10">
           队列 {{ queueSummary.total }}
         </span>
+        <button
+          v-if="canBrowse && !browserMode"
+          type="button"
+          class="btn-ghost"
+          tabindex="-1"
+          title="浏览服务端目录（ListDirectory）"
+          @click.stop="openImagePicker()"
+        >
+          <Icon name="folder" :size="14" />
+          浏览
+        </button>
         <button type="button" class="btn-ghost" tabindex="-1" @click.stop="choose">
           <Icon name="plus" :size="14" />
           选择图片

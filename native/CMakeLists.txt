@@ -1,4 +1,4 @@
-# Project Chronos 鈥?native compute layer (C++17)
+# Project Chronos - native compute layer (C++17)
 #
 # Builds:
 #   chronos             shared library: chronos.dll (Windows) / libchronos.so (Linux)

@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 package inhibit
 
@@ -20,7 +20,7 @@ const (
 )
 
 var (
-	kernel32                   = syscall.NewLazyDLL("kernel32.dll")
+	kernel32                    = syscall.NewLazyDLL("kernel32.dll")
 	procSetThreadExecutionState = kernel32.NewProc("SetThreadExecutionState")
 )
 

@@ -4,9 +4,14 @@
 #   native-linux       -> native-linux       (libchronos.so, chronos_native_cli, headers)
 #   native-windows     -> native-windows     (chronos.dll, libchronos.dll.a, chronos_native_cli.exe, headers)
 #   go                 -> (no artifact)      go vet / go test on ubuntu + windows
-#   native-integration -> (no artifact)      cgo tests + headless CLI smoke on both OSes
+#   native-integration -> (no artifact)      cgo tests, headless CLI smoke, browser-mode HTTP smoke (linux)
 #   frontend           -> frontend-dist      frontend/dist
 #   package            -> chronos-linux / chronos-windows (only main + manual dispatch)
+#
+# Browser mode: the CLI (`./cmd/chronos serve`) serves the embedded UI over
+# 127.0.0.1 with no Wails/GTK dependency. The package jobs also build that CLI
+# (`build/bin/chronos-cli`) and ship it as chronos-<ver>-linux-amd64-web.tar.gz
+# on Linux and as chronos-cli.exe + chronos-web.cmd inside the Windows zip.
 #
 # NOTE on Linux + cgo: the Wails Linux webview bindings are cgo-only
 # (gtk+-3.0 via pkg-config), so a CGO_ENABLED=0 build of the root package cannot
@@ -182,7 +187,7 @@ jobs:
   native-integration:
     name: native-integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: [native-linux, native-windows]
+    needs: [native-linux, native-windows, frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -242,6 +247,17 @@ jobs:
           name: native-windows
           path: .
 
+      # Browser mode serves the built UI from disk (ResolveAssets); the checkout
+      # only has frontend/dist/.gitkeep, so pull the real build from the frontend
+      # job. Downloaded into a dedicated dir because upload-artifact layout
+      # (contents at root vs. frontend/dist/...) is not worth guessing.
+      - name: Download frontend-dist for browser smoke (linux)
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist
+
       - name: Put chronos.dll on PATH (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -268,6 +284,24 @@ jobs:
       - name: Smoke test (linux)
         if: runner.os == 'Linux'
         run: bash scripts/ubuntu-smoke.sh ./chronos
+
+      # Browser mode: no display server involved - the CLI starts an HTTP server
+      # on 127.0.0.1, we hit the JSON API and shut it down again.
+      - name: Browser-mode smoke (linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          if [ -f frontend-dist/index.html ]; then
+            ASSETS="${PWD}/frontend-dist"
+          elif [ -f frontend-dist/frontend/dist/index.html ]; then
+            ASSETS="${PWD}/frontend-dist/frontend/dist"
+          else
+            echo "frontend-dist artifact contains no index.html" >&2
+            find frontend-dist -maxdepth 4 -type f >&2 || true
+            exit 1
+          fi
+          echo "browser smoke assets: ${ASSETS}"
+          CHRONOS_ASSETS_DIR="${ASSETS}" bash scripts/browser-smoke.sh ./chronos
 
       - name: Smoke test (windows)
         if: runner.os == 'Windows'
@@ -452,13 +486,32 @@ jobs:
           wails build -clean -tags "chronos_native" -platform windows/amd64 \
             -ldflags "-X main.version=${VERSION}"
 
-      - name: Package .deb + .tar.gz (linux)
+      # Browser-mode CLI: same Go module, no Wails/GTK dependency. Built after the
+      # frontend build so the web/ assets shipped in the tarball/zip are current.
+      - name: Build browser-mode CLI (linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli ./cmd/chronos
+          ls -l build/bin/chronos-cli
+
+      - name: Build browser-mode CLI (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli.exe ./cmd/chronos
+          ls -l build/bin/chronos-cli.exe
+
+      - name: Package web tarball + .deb + .tar.gz (linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist-packages
-          VERSION="${VERSION}" OUT_DIR=dist-packages bash scripts/package-linux.sh
+          VERSION="${VERSION}" OUT_DIR=dist-packages WEB_BIN=build/bin/chronos-cli DIST_DIR=frontend/dist \
+            bash scripts/package-linux.sh
 
       - name: Package .zip (windows)
         if: runner.os == 'Windows'
@@ -467,10 +520,28 @@ jobs:
           $ErrorActionPreference = "Stop"
           $stage = "dist-packages\chronos-$env:VERSION-windows-amd64"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          $exe = Get-ChildItem -Path build/bin -Filter *.exe -ErrorAction SilentlyContinue |
-            Sort-Object Length -Descending | Select-Object -First 1
+          $exe = Get-ChildItem -Path build/bin -Filter chronos.exe -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path build/bin -Filter *.exe -ErrorAction SilentlyContinue |
+              Sort-Object Length -Descending | Select-Object -First 1
+          }
           if (-not $exe) { throw "wails output not found under build/bin" }
           Copy-Item $exe.FullName (Join-Path $stage "chronos.exe")
+          # Browser mode without WebView2: headless CLI + a double-click launcher.
+          Copy-Item build/bin/chronos-cli.exe $stage
+          Set-Content -Path (Join-Path $stage "chronos-web.cmd") -Encoding ascii -Value @(
+            "@echo off",
+            "setlocal",
+            'cd /d "%~dp0"',
+            '"%~dp0chronos-cli.exe" serve --open %*'
+          )
+          # Browser mode serves the built UI from <exeDir>\web (ResolveAssets).
+          if (-not (Test-Path -Path "frontend/dist/index.html")) {
+            throw "frontend/dist/index.html missing; the frontend build must run before packaging"
+          }
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "web") | Out-Null
+          Copy-Item -Path "frontend/dist/*" -Destination (Join-Path $stage "web") -Recurse -Force
           Copy-Item native/build/chronos.dll $stage
           New-Item -ItemType Directory -Force -Path (Join-Path $stage "models") | Out-Null
           Copy-Item internal/models/registry.json (Join-Path $stage "models")

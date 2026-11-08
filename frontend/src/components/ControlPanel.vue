@@ -32,6 +32,10 @@ const {
   start,
   cancel,
   pickOutputDir,
+  setOutputDir,
+  canBrowse,
+  browserMode,
+  openOutputPicker,
   selectModel,
   loadModels,
 } = props.store
@@ -74,7 +78,19 @@ function setThreads(raw: string): void {
 }
 
 function clearOutputDir(): void {
-  props.store.outputDir.value = ''
+  props.store.setOutputDir('')
+}
+
+/** 输出目录支持手动输入（浏览器模式没有原生目录对话框）。 */
+function onOutputInput(event: Event): void {
+  const value = (event.target as HTMLInputElement).value
+  setOutputDir(value)
+}
+
+function onOutputKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    ;(event.target as HTMLInputElement).blur()
+  }
 }
 
 function toggleFast(): void {
@@ -220,17 +236,42 @@ function setScale(value: number): void {
           </button>
         </div>
         <div class="mt-1.5 flex items-stretch gap-1.5">
-          <div
-            class="input min-w-0 flex-1 truncate font-mono !py-1 text-[10.5px] !text-mute-soft"
+          <input
+            class="input min-w-0 flex-1 truncate font-mono !py-1 !text-[10.5px] !text-mute-soft"
+            type="text"
+            :value="outputDir"
+            placeholder="与输入同目录（默认）"
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="输出目录（可手动输入）"
             :title="outputDir"
+            @input="onOutputInput"
+            @keydown="onOutputKeydown"
+          />
+          <button
+            v-if="canBrowse"
+            type="button"
+            class="btn-ghost shrink-0 !px-2.5 !py-1"
+            title="浏览服务端目录（ListDirectory）"
+            @click="openOutputPicker()"
           >
-            {{ outputDir || '与输入同目录（默认）' }}
-          </div>
-          <button type="button" class="btn-ghost shrink-0 !px-2.5 !py-1" @click="pickOutputDir()">
+            <Icon name="folder" :size="13" />
+            浏览
+          </button>
+          <button
+            v-if="!browserMode"
+            type="button"
+            class="btn-ghost shrink-0 !px-2.5 !py-1"
+            title="打开系统目录选择对话框"
+            @click="pickOutputDir()"
+          >
             <Icon name="folder" :size="13" />
             选择
           </button>
         </div>
+        <p v-if="browserMode" class="mt-1 text-[10px] text-mute-soft">
+          浏览器模式：可直接输入绝对路径，或点击「浏览」在服务端选择目录。
+        </p>
       </div>
 
       <div class="divider !my-2.5" />

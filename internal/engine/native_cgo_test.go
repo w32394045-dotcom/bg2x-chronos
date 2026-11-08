@@ -1,4 +1,4 @@
-﻿//go:build cgo && chronos_native
+//go:build cgo && chronos_native
 
 package engine
 

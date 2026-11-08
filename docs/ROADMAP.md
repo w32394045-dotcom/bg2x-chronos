@@ -7,9 +7,9 @@
 
 | 阶段 | 主题 | 状态 |
 | --- | --- | --- |
-| Phase 1 | 核心骨架：契约、C++ 算力层、Go 调度、CI | 基本完成（待 CI 首跑） |
+| Phase 1 | 核心骨架：契约、C++ 算力层、Go 调度、CI | 完成（CI 首跑已绿） |
 | Phase 2 | 模型推理与批量处理 | 进行中 |
-| Phase 3 | 桌面体验、抑制、打包分发 | 基本完成（待安装包实测） |
+| Phase 3 | 桌面体验、抑制、打包分发、浏览器模式 | 基本完成（待安装包实测） |
 | Phase 4 | 性能、生态与平台扩展 | 计划中 |
 
 ---
@@ -28,7 +28,7 @@
 | Go engine 抽象 + 纯 Go 回退 | 完成 | `internal/engine/{types,provider,fallback,native_cgo,native_stub}.go` |
 | Go 调度（队列、并发上限 8、取消、事件） | 完成 | `internal/scheduler`，含单元测试 |
 | Wails 壳（RPC + 事件） | 完成 | `main.go` + `app.go` 实现契约 §3 的 App 方法；wails.json / build 资源就位 |
-| CLI `cmd/chronos` | 完成 | `upscale/info/gen/models/inhibit/bench`；Windows 本地冒烟通过 |
+| CLI `cmd/chronos` | 完成 | `upscale/info/gen/models/inhibit/bench`；浏览器模式 `serve` 见 Phase 3 |
 | 前端壳（Vue 3 + Vite + Tailwind，mock 模式） | 完成 | `frontend/src/**` 组件与 `api.ts` 薄封装 |
 | CI（native/Go/集成/前端/打包）+ 本套文档 | 完成 | `.github/workflows/ci.yml`、`scripts/*`、`docs/*` |
 
@@ -40,10 +40,10 @@
 4. `wails build` 在 Linux（webkit2_41）与 Windows 通过，`chronos info` 显示 `stub`；
 5. 前端 `pnpm test` / `pnpm build` 通过，根包能 embed `frontend/dist`。
 
-当前已验证（2026-11-08，Windows 本机）：native CMake 构建 + ctest、
-`go test -tags chronos_native ./internal/engine/...`、`chronos upscale --no-model`
-冒烟（`stub` 与 `go-lanczos` 两种构建）均通过。Linux/ASan 与 GitHub Actions
-首跑仍需 CI 验证（本机无 Linux 环境），因此总状态记为"基本完成"。
+当前已验证：CI 已通过（run 42446150990）并发布 v0.1.0；本机（Windows）另行验证了
+native CMake 构建 + ctest、`go test -tags chronos_native ./internal/engine/...`、
+`chronos upscale --no-model` 冒烟（`stub` 与 `go-lanczos` 两种构建）、`serve` 的
+HTTP/SSE API 冒烟与浏览器模式打包。Linux/ASan 以 CI 结果为准。
 
 ## Phase 2 — 模型推理与批量
 
@@ -71,14 +71,17 @@ CPU 与（有条件的）GPU 上跑通 2x/4x；`chronos info` 报告 `openvino` 
 | 设置持久化（并发、输出目录、上次模型等） | 完成 | `internal/config`（`settings.json`，损坏安全回退） |
 | 错误恢复（坏图跳过、失败清单、日志） | 进行中 | `BatchResult.skipped` / `ProgressEvent.kind=failed` 已定义，UI 呈现待联调 |
 | Linux 打包（.deb + .tar.gz + SHA256SUMS） | 完成 | `scripts/package-linux.sh`，CI `package` job |
-| Windows 打包（zip：exe + dll + registry） | 完成 | CI `package` job（PowerShell 组装） |
+| Windows 打包（zip：GUI + CLI + web + dll + registry） | 完成 | CI `package` job（PowerShell 组装） |
+| 浏览器模式（`chronos serve`，无 WebView/GTK 依赖） | 完成 | `internal/browser` + `internal/uiapp`；随机端口、cookie+Origin、SSE；见 `docs/BROWSER.md` |
+| 浏览器模式打包与冒烟 | 完成 | Linux `chronos-<ver>-linux-amd64-web.tar.gz`；Windows zip 内含 `chronos-cli.exe`+`web/`；CI `browser-smoke` |
 | Release 流水线（tag v* → GitHub Release） | 完成 | `.github/workflows/release.yml`，softprops/action-gh-release@v2 |
 | 自动更新 | 计划中 | 需要签名/更新源设计，Phase 4 再评估 |
 | 安装包签名（Windows Authenticode / Linux 仓库签名） | 计划中 | 依赖发布基础设施 |
 
 **Phase 3 验收条件**：在干净的 Ubuntu 24.04 与 Windows 11 上，从 Release 资产安装
 后能完成一次 10 张图批量任务；抑制在任务期间生效、结束后释放；`.deb` 的
-`/usr/bin/chronos` 能启动且找到 `/opt/chronos/libs/libchronos.so`。
+`/usr/bin/chronos` 能启动且找到 `/opt/chronos/libs/libchronos.so`；浏览器模式
+`-web.tar.gz` 解压后 `./chronos-web` 能启动并完成一次任务（无 WebKit 的机器亦可）。
 
 ## Phase 4 — 性能、生态与平台扩展
 
@@ -113,6 +116,9 @@ CPU 与（有条件的）GPU 上跑通 2x/4x；`chronos info` 报告 `openvino` 
 7. **CI 不做真实模型推理**：只验证结构、尺寸、错误码与冒烟链路；模型画质/速度
    结论必须来自本机实测并注明硬件。
 8. **无自动更新、无遥测**；日志只在本机。
+9. **浏览器模式是本机单用户模型**：只绑定 127.0.0.1 + 会话 cookie + Origin 校验，
+   不做多用户/远程/公网访问；CLI 的 `serve` 需要 `web/`（或 `--assets`）提供 UI，
+   GUI 回退模式则用内嵌资产；Windows 打包的浏览器模式没有独立 CI 冒烟（Linux 有）。
 
 ## 变更记录
 
@@ -120,3 +126,4 @@ CPU 与（有条件的）GPU 上跑通 2x/4x；`chronos info` 报告 `openvino` 
 | --- | --- |
 | 2026-11-08 | 初版：Phase 1–4 状态、验收条件、真实限制 |
 | 2026-11-08 | 按仓库实际实现更新 Phase 1/2/3 状态；记录 Windows 本地验证结果 |
+| 2026-11-08 | 新增浏览器模式（serve/打包/冒烟）与 `chronos inhibit selftest`；Phase 1 标记完成 |

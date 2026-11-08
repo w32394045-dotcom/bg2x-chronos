@@ -38,12 +38,32 @@ describe('mock api（浏览器预览后端）', () => {
     expect(info.engine.backend).toBe('stub')
     expect(info.maxConcurrency).toBe(8)
     expect(typeof info.dataDir).toBe('string')
+    expect(info.mode).toBe('desktop')
+    expect(info.browseSupported).toBe(true)
 
     const models = await api.ListModels()
     expect(models.length).toBeGreaterThan(0)
     expect(models.every((model) => typeof model.id === 'string' && typeof model.scale === 'number')).toBe(true)
     expect(models.every((model) => typeof model.installed === 'boolean')).toBe(true)
     expect(models.some((model) => model.installed)).toBe(true)
+  })
+
+  it('ListDirectory 返回目录列表（PathPicker 预览数据源）', async () => {
+    const home = await api.ListDirectory('')
+    expect(home.path).toBe('C:\\Users\\Public\\Pictures')
+    expect(Array.isArray(home.entries)).toBe(true)
+    expect(home.entries.some((entry) => entry.isDir)).toBe(true)
+    expect(home.entries.some((entry) => entry.isImage)).toBe(true)
+    expect(home.entries.every((entry) => typeof entry.path === 'string' && typeof entry.size === 'number')).toBe(true)
+
+    const sub = await api.ListDirectory('C:\\Users\\Public\\Pictures\\风景')
+    expect(sub.entries.length).toBeGreaterThan(0)
+    expect(sub.parent).toBe('C:\\Users\\Public\\Pictures')
+
+    // 未知目录：空列表但 parent 可用，UI 仍能上溯
+    const unknown = await api.ListDirectory('C:\\nowhere')
+    expect(unknown.entries).toEqual([])
+    expect(unknown.parent).toBe('C:\\')
   })
 
   it('SetConcurrency 校验 1..8，GetConcurrency 同步生效', async () => {

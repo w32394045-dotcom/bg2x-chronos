@@ -5,7 +5,7 @@ import type { ChronosStore } from '@/composables/useChronos'
 import { backendLabel } from '@/lib/labels'
 
 const props = defineProps<{ store: ChronosStore }>()
-const { appInfo, concurrency, maxConcurrency, queueSummary, running, openDataDir } = props.store
+const { appInfo, concurrency, maxConcurrency, queueSummary, running, openDataDir, browserMode, previewMode } = props.store
 
 const engineText = computed(() => {
   const engine = appInfo.value?.engine
@@ -18,6 +18,16 @@ const engineText = computed(() => {
   <footer
     class="flex h-[26px] shrink-0 items-center gap-3 border-t border-line bg-ink-900/85 px-4 font-mono text-[10px] text-mute-soft"
   >
+    <span
+      v-if="browserMode"
+      class="flex items-center gap-1 rounded px-1 text-sky-300"
+      title="浏览器模式：页面由本地 Go 服务提供（POST /api + SSE）"
+    >
+      浏览器模式
+    </span>
+    <span v-else-if="previewMode" class="flex items-center gap-1 rounded px-1 text-amber-300" title="vite dev 预览，数据来自 mock">
+      预览模式
+    </span>
     <span class="flex items-center gap-1" title="Go 调度层维护的并发数（上限 8）">
       <Icon name="layers" :size="10" />
       并发 {{ concurrency }}/{{ maxConcurrency }}
