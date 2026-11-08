@@ -269,7 +269,7 @@ func (c *Core) initialise() {
 		c.log("info", fmt.Sprintf(format, args...))
 	})
 	if settings.AccelMode != config.AccelCPU {
-		if dir, ok := c.runtimeMgr.Activate(chronosruntime.FlavorDirectML); ok {
+		if dir, ok := c.runtimeMgr.Activate(c.runtimeMgr.GpuFlavor()); ok {
 			c.logLocked("info", "已启用 GPU 运行时: "+dir)
 		}
 	}

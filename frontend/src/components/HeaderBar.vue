@@ -215,7 +215,7 @@ async function setMode(mode: string): Promise<void> {
               class="btn-ghost mt-1.5 w-full"
               @click="installGpu"
             >
-              下载 GPU 运行时（DirectML {{ gpuRuntime?.sizeMb }} MB）
+              下载 GPU 运行时（{{ gpuRuntime?.flavor === 'cuda' ? 'CUDA' : 'DirectML' }} {{ gpuRuntime?.sizeMb }} MB）
             </button>
             <p v-if="gpuInstallFailed" class="mt-1 text-[10px] text-rose-300">
               安装失败：{{ accelStatus?.installError }}

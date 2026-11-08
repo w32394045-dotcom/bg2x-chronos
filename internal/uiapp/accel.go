@@ -59,7 +59,7 @@ func (c *Core) GetAccelStatus() AccelStatus {
 		FallbackReason: reason,
 	}
 	if mgr := c.runtimeManager(); mgr != nil {
-		status.GpuRuntime = mgr.State(runtime.FlavorDirectML)
+		status.GpuRuntime = mgr.State(mgr.GpuFlavor())
 		phase, part, done, total, lastErr := mgr.Progress()
 		status.InstallPhase, status.InstallPart = phase, part
 		status.InstallDone, status.InstallTotal, status.InstallError = done, total, lastErr

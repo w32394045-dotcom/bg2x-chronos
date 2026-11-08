@@ -15,7 +15,9 @@
 package runtime
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -39,6 +41,7 @@ const DirectMLVersion = "1.15.4"
 const (
 	FlavorCPU      = "cpu"      // bundled with the packages (no download)
 	FlavorDirectML = "directml" // optional GPU runtime (Windows only)
+	FlavorCUDA     = "cuda"     // optional GPU runtime (Linux/NVIDIA only)
 )
 
 // EnvVar is the environment variable the native loader reads first.
@@ -87,7 +90,56 @@ func basenameDL(prefix string) func(string) string {
 	}
 }
 
-// DirectMLComponent is the pinned Windows GPU runtime.
+// CUDAComponent is the pinned Linux/NVIDIA runtime (official ORT release).
+// The archive still needs the system CUDA 12 libraries; it only carries the
+// ONNX Runtime CUDA execution provider itself.
+func CUDAComponent() Component {
+	return Component{
+		Flavor:   FlavorCUDA,
+		Version:  ORTVersion,
+		Required: []string{"libonnxruntime.so"},
+		Parts: []Part{
+			{
+				Name:   "onnxruntime-cuda",
+				URL: "https://github.com/microsoft/onnxruntime/releases/download/v" + ORTVersion +
+					"/onnxruntime-linux-x64-gpu-" + ORTVersion + ".tgz",
+				SHA256: "", // filled in below once verified (see ORTCUDAArchiveSHA256)
+				SizeMB: 195.9,
+				Extract: func(entry string) string {
+					const marker = "/lib/"
+					index := strings.Index(entry, marker)
+					if index < 0 {
+						return ""
+					}
+					name := entry[index+len(marker):]
+					if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) {
+						return ""
+					}
+					return name
+				},
+			},
+		},
+	}
+}
+
+// ORTCUDAArchiveSHA256 is the SHA256 of the pinned CUDA runtime archive.
+const ORTCUDAArchiveSHA256 = "c5f804ff5d239b436fa59e9f2fb288a39f7eb9552f6a636c8b71e792e91a8808"
+
+// defaultComponent returns the GPU runtime component for this platform. It is
+// empty on platforms without a supported GPU path, and Install() refuses to run
+// for a component that does not match the platform: DirectML is never offered on
+// Linux and CUDA is never offered on Windows.
+func defaultComponent() Component {
+	if runtime.GOOS == "linux" {
+		component := CUDAComponent()
+		component.Parts[0].SHA256 = ORTCUDAArchiveSHA256
+		return component
+	}
+	if runtime.GOOS == "windows" {
+		return DirectMLComponent()
+	}
+	return Component{}
+}
 // SHA256 values were verified against nuget.org on 2026-11-08.
 func DirectMLComponent() Component {
 	return Component{
@@ -145,7 +197,7 @@ func NewManager(dataDir string) *Manager {
 	return &Manager{
 		root:       filepath.Join(dataDir, "runtime"),
 		downloader: &artifact.Downloader{},
-		component:  DirectMLComponent(),
+		component:  defaultComponent(),
 	}
 }
 
@@ -198,12 +250,25 @@ func (m *Manager) Installed(flavor string) bool {
 	return true
 }
 
+// GpuFlavor is the GPU runtime flavor this platform would use ("" when the
+// platform has no supported GPU path). Linux reports "cuda" only when an NVIDIA
+// device is present; DirectML is never offered on Linux.
+func (m *Manager) GpuFlavor() string {
+	m.mu.Lock()
+	flavor := m.component.Flavor
+	m.mu.Unlock()
+	if !platformSupportsFlavor(flavor) {
+		return ""
+	}
+	return flavor
+}
+
 // State reports one flavor for the UI.
 func (m *Manager) State(flavor string) State {
 	m.mu.Lock()
 	component := m.component
 	m.mu.Unlock()
-	installable := flavor == FlavorDirectML && runtime.GOOS == "windows" && component.Flavor == flavor
+	installable := component.Flavor == flavor && platformSupportsFlavor(flavor)
 	return State{
 		Flavor:      flavor,
 		Installed:   m.Installed(flavor),
@@ -236,8 +301,8 @@ func (m *Manager) Install(ctx context.Context) error {
 			logf(format, args...)
 		}
 	}
-	if component.Flavor != FlavorDirectML || runtime.GOOS != "windows" {
-		err := fmt.Errorf("GPU runtime is only available for Windows/DirectML in this build")
+	if component.Flavor == "" || !platformSupportsFlavor(component.Flavor) {
+		err := fmt.Errorf("no GPU runtime component for this platform (DirectML is Windows only, CUDA is Linux only)")
 		m.fail(err)
 		return err
 	}
@@ -324,7 +389,10 @@ func (m *Manager) setPhase(phase, part string) {
 // CHRONOS_ORT_DIR. It must run before the first engine is created: the native
 // loader caches a successfully loaded library for the process lifetime.
 func (m *Manager) Activate(flavor string) (string, bool) {
-	if flavor != FlavorDirectML || !m.Installed(flavor) {
+	m.mu.Lock()
+	componentFlavor := m.component.Flavor
+	m.mu.Unlock()
+	if flavor != componentFlavor || !platformSupportsFlavor(flavor) || !m.Installed(flavor) {
 		return "", false
 	}
 	dir := m.Dir(flavor)
@@ -348,8 +416,25 @@ func (m *Manager) Remove(flavor string) error {
 	return artifact.Remove(m.Dir(flavor))
 }
 
-// extractArchive unpacks matching zip entries into dir (no path traversal).
+// platformSupportsFlavor reports whether the flavor makes sense on this OS.
+// DirectML is Windows-only; CUDA is Linux-only and additionally gated on an
+// NVIDIA-capable machine so we never push a 196 MB download at a machine that
+// cannot use it.
+func platformSupportsFlavor(flavor string) bool {
+	switch flavor {
+	case FlavorDirectML:
+		return runtime.GOOS == "windows"
+	case FlavorCUDA:
+		return runtime.GOOS == "linux" && nvidiaPresent()
+	}
+	return false
+}
+
+// extractArchive unpacks matching zip or tar.gz entries into dir (no traversal).
 func extractArchive(archivePath, dir string, match func(string) string) error {
+	if strings.HasSuffix(strings.ToLower(archivePath), ".tgz") || strings.HasSuffix(strings.ToLower(archivePath), ".tar.gz") {
+		return extractTarArchive(archivePath, dir, match)
+	}
 	reader, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return fmt.Errorf("open runtime archive: %w", err)
@@ -383,6 +468,74 @@ func extractArchive(archivePath, dir string, match func(string) string) error {
 			return err
 		}
 		src.Close()
+	}
+	return nil
+}
+
+// extractTarArchive handles .tgz/.tar.gz archives. The official ONNX Runtime
+// Linux release stores libonnxruntime.so as a symlink to the versioned file, and
+// the native loader needs a real file, so symlinks are materialised as copies.
+func extractTarArchive(archivePath, dir string, match func(string) string) error {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return fmt.Errorf("open runtime archive: %w", err)
+	}
+	defer gzipReader.Close()
+	reader := tar.NewReader(gzipReader)
+	type link struct{ name, target string }
+	var links []link
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read runtime archive: %w", err)
+		}
+		base := match(header.Name)
+		if base == "" {
+			continue
+		}
+		if strings.Contains(base, "..") || strings.ContainsAny(base, `/\`) {
+			return fmt.Errorf("refusing suspicious archive entry %q", header.Name)
+		}
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
+			target := match(header.Linkname)
+			if target == "" {
+				target = filepath.Base(header.Linkname)
+			}
+			links = append(links, link{name: base, target: target})
+			continue
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		dst, err := os.Create(filepath.Join(dir, base))
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(dst, reader); err != nil {
+			dst.Close()
+			return err
+		}
+		if err := dst.Close(); err != nil {
+			return err
+		}
+	}
+	for _, entry := range links {
+		target := filepath.Join(dir, entry.target)
+		data, err := os.ReadFile(target)
+		if err != nil {
+			continue // dangling link: the required-file check reports it later
+		}
+		if err := os.WriteFile(filepath.Join(dir, entry.name), data, 0o644); err != nil {
+			return err
+		}
 	}
 	return nil
 }
