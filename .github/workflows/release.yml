@@ -235,13 +235,13 @@ jobs:
     needs: [meta, build-linux, build-windows]
     steps:
       - name: Download linux packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: chronos-linux
           path: dist
 
       - name: Download windows packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: chronos-windows
           path: dist
