@@ -167,9 +167,8 @@ func TestManagerActivate(t *testing.T) {
 func TestState(t *testing.T) {
 	m := newTestManager(t)
 	state := m.State(FlavorDirectML)
-	wantInstallable := runtime.GOOS == "windows"
-	if state.Flavor != FlavorDirectML || state.Installed || state.Installable != wantInstallable {
-		t.Fatalf("state = %+v (installable want %v)", state, wantInstallable)
+	if state.Flavor != FlavorDirectML || state.Installed || !state.Installable {
+		t.Fatalf("state = %+v", state)
 	}
 	if state.Version != "1.24.4" || state.SizeMB <= 0 {
 		t.Fatalf("state component info = %+v", state)
@@ -180,3 +179,15 @@ func TestState(t *testing.T) {
 }
 
 var _ = io.Discard
+// TestPlatformFlavorGating pins the platform matrix: DirectML is Windows only,
+// and Linux never offers it (the whole point of the runtime flavor split).
+func TestPlatformFlavorGating(t *testing.T) {
+	if got, want := platformSupportsFlavor(FlavorDirectML), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("DirectML supported = %v, want %v", got, want)
+	}
+	if runtime.GOOS != "linux" {
+		if platformSupportsFlavor(FlavorCUDA) || platformSupportsFlavor(FlavorOpenVINO) {
+			t.Fatal("CUDA/OpenVINO must not be offered outside Linux")
+		}
+	}
+}
