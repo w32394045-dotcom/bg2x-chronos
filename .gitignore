@@ -1,0 +1,48 @@
+# --- native -----------------------------------------------------------------
+native/build/
+native/out/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.lib
+*.a
+*.exp
+*.pdb
+
+# --- go ---------------------------------------------------------------------
+/chronos
+/chronos.exe
+/cmd/chronos/chronos
+/cmd/chronos/chronos.exe
+/dist/
+*.test
+coverage.out
+coverage.html
+
+# --- frontend ---------------------------------------------------------------
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+frontend/.vite/
+frontend/wailsjs/
+
+# --- models / runtime data --------------------------------------------------
+models/*.onnx
+models/*.xml
+models/*.bin
+libs/*.dll
+libs/*.so
+!libs/.gitkeep
+
+# --- misc -------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.log
+.tools/
+
+# --- local/tool artifacts ---
+__pycache__/
+*.pyc
+_install.log

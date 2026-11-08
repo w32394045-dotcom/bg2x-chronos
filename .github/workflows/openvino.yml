@@ -1,0 +1,95 @@
+# Project Chronos - OPTIONAL OpenVINO backend verification.
+#
+# This workflow is manual-only on purpose. It exists to document and verify the
+# real build path for the optional OpenVINO backend:
+#
+#   cmake -S native -B native/build-openvino -G Ninja \
+#         -DCHRONOS_WITH_OPENVINO=ON -DCMAKE_BUILD_TYPE=Release
+#
+# It is deliberately NOT part of ci.yml: OpenVINO is an optional acceleration
+# backend (ADR-002), the shipped binary and the required CI must stay buildable
+# without a multi-hundred-megabyte runtime. The stub (Lanczos) backend is
+# always available, so a missing/broken OpenVINO install is not a CI failure.
+#
+# How the runtime is obtained: Intel's APT repository (the same packages as
+# https://docs.openvino.ai). The alternative is the runtime tarball from
+# https://storage.openvinotoolkit.org/repositories/openvino/packages/ - in that
+# case source the extracted `setupvars.sh` and pass
+# -DOpenVINO_DIR=<extracted>/runtime/cmake to the configure step.
+
+name: OpenVINO (optional)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openvino-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openvino-native:
+    name: openvino build check (non-blocking documentation)
+    runs-on: ubuntu-latest
+    # A failed OpenVINO install / configure / run is informative, not a gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config wget gnupg ca-certificates
+
+      - name: Install OpenVINO runtime from Intel APT repository
+        run: |
+          set -euo pipefail
+          wget -q https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
+          sudo gpg --output /etc/apt/trusted.gpg.d/intel.gpg --dearmor GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
+          echo "deb https://apt.repos.intel.com/openvino ubuntu24 main" \
+            | sudo tee /etc/apt/sources.list.d/intel-openvino.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openvino
+
+      - name: Show installed OpenVINO packages
+        run: |
+          set -euo pipefail
+          dpkg -l | grep -i openvino || true
+          find /usr -name "OpenVINOConfig.cmake" 2>/dev/null || true
+
+      - name: Configure with -DCHRONOS_WITH_OPENVINO=ON
+        shell: bash
+        run: |
+          set -euo pipefail
+          OV_DIR="$(find /usr -name 'OpenVINOConfig.cmake' -printf '%h\n' 2>/dev/null | head -n 1 || true)"
+          EXTRA_ARGS=()
+          if [ -n "${OV_DIR}" ]; then
+            EXTRA_ARGS+=("-DOpenVINO_DIR=${OV_DIR}")
+          fi
+          cmake -S native -B native/build-openvino -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHRONOS_BUILD_TESTS=OFF \
+            -DCHRONOS_WITH_OPENVINO=ON \
+            "${EXTRA_ARGS[@]}"
+
+      - name: Build chronos_native_cli
+        run: cmake --build native/build-openvino --parallel --target chronos_native_cli
+
+      - name: Run --info (backend must report OpenVINO)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./native/build-openvino/chronos_native_cli --info | tee openvino-info.txt
+          grep -qi openvino openvino-info.txt
+
+      - name: Upload info log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openvino-info
+          path: openvino-info.txt
+          if-no-files-found: warn
+          retention-days: 7

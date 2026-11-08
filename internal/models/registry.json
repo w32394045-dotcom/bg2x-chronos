@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "updated": "2026-11-08",
+  "models": [
+    {
+      "id": "realesr-general-x4v3",
+      "name": "Real-ESRGAN General x4v3",
+      "scale": 4,
+      "kind": "general",
+      "sizeMB": 4.9,
+      "description": "轻量通用模型，速度快，适合大批量预处理与低配设备。",
+      "url": "https://huggingface.co/Heliosoph/realesrgan-onnx/resolve/main/realesr-general-x4v3.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/ctan0ctan0/realesrgan-onnx/resolve/master/realesr-general-x4v3.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "real-esrgan-x4plus",
+      "name": "Real-ESRGAN x4plus",
+      "scale": 4,
+      "kind": "photo",
+      "sizeMB": 67,
+      "description": "真实照片/老照片修复主力模型，纹理细节最丰富，显存占用较高。",
+      "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x4.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/starwhisper9/Real-ESRGAN-onnx/resolve/master/RealESRGAN_x4plus.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "swin2sr-lightweight-x2",
+      "name": "Swin2SR Lightweight x2",
+      "scale": 2,
+      "kind": "compressed",
+      "sizeMB": 8.1,
+      "description": "Swin2SR 轻量版，2 倍放大，对压缩伪影抑制好，速度较快。",
+      "url": "https://huggingface.co/Xenova/swin2SR-lightweight-x2-64/resolve/main/onnx/model.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Xenova/swin2SR-lightweight-x2-64/resolve/master/onnx/model.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "swin2sr-classical-x4",
+      "name": "Swin2SR Classical x4",
+      "scale": 4,
+      "kind": "compressed",
+      "sizeMB": 55,
+      "description": "Swin2SR 经典 4 倍模型，保文字/线条，适合漫画与扫描件。",
+      "url": "https://huggingface.co/Xenova/swin2SR-classical-sr-x4-64/resolve/main/onnx/model.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Xenova/swin2SR-classical-sr-x4-64/resolve/master/onnx/model.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "swin2sr-realworld-x4",
+      "name": "Swin2SR RealWorld x4",
+      "scale": 4,
+      "kind": "photo",
+      "sizeMB": 53,
+      "description": "Swin2SR 真实退化 4 倍模型，兼顾去噪与细节。",
+      "url": "https://huggingface.co/Xenova/swin2SR-realworld-sr-x4-64-bsrgan-psnr/resolve/main/onnx/model.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Xenova/swin2SR-realworld-sr-x4-64-bsrgan-psnr/resolve/master/onnx/model.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "swin2sr-compressed-x4",
+      "name": "Swin2SR Compressed x4",
+      "scale": 4,
+      "kind": "compressed",
+      "sizeMB": 55,
+      "description": "针对 JPEG 压缩失真训练的 4 倍模型，漫画修复首选。",
+      "url": "https://huggingface.co/Xenova/swin2SR-compressed-sr-x4-48/resolve/main/onnx/model.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Xenova/swin2SR-compressed-sr-x4-48/resolve/master/onnx/model.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "real-cugan-2x",
+      "name": "Real-CUGAN 2x (HFA2k)",
+      "scale": 2,
+      "kind": "anime",
+      "sizeMB": 5.2,
+      "description": "动漫 2 倍放大，线条锐利、色彩稳定。",
+      "url": "https://huggingface.co/nesaorg/2xHFA2kReal-CUGAN_fp32_opset17/resolve/main/2xHFA2kReal-CUGAN_fp32_opset17.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/nesaorg/2xHFA2kReal-CUGAN_fp32_opset17/resolve/master/2xHFA2kReal-CUGAN_fp32_opset17.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "real-esrgan-animevideov3",
+      "name": "Real-ESRGAN AnimeVideo v3",
+      "scale": 4,
+      "kind": "anime",
+      "sizeMB": 2.5,
+      "description": "超轻量动漫模型，2.5MB，批量处理速度极快。",
+      "url": "https://huggingface.co/skillsafe-ai/realesr-animevideov3/resolve/main/model.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Rokaa111/real-esrgan-animevideov3/resolve/master/model.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "real-esrgan-x4plus-anime",
+      "name": "Real-ESRGAN x4plus Anime",
+      "scale": 4,
+      "kind": "anime",
+      "sizeMB": 18,
+      "description": "Anime 6B 模型，插画/动漫截图 4 倍放大，细节与平滑兼顾。",
+      "url": "https://huggingface.co/deepghs/imgutils-models/resolve/main/real_esrgan/RealESRGAN_x4plus_anime_6B.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Rokaa111/RealESRGAN_x4plus_anime_6B/resolve/master/RealESRGAN_x4plus_anime_6B.onnx"
+      ],
+      "sha256": ""
+    },
+    {
+      "id": "real-esrgan-x4plus-anime-4b32f",
+      "name": "Real-ESRGAN x4plus Anime 4B32F",
+      "scale": 4,
+      "kind": "anime",
+      "sizeMB": 5.2,
+      "description": "4B32F 轻量动漫模型，速度与画质折中。",
+      "url": "https://huggingface.co/deepghs/imgutils-models/resolve/main/real_esrgan/RealESRGAN_x4plus_anime_4B32F.onnx",
+      "fallbackUrls": [
+        "https://www.modelscope.cn/models/Rokaa111/real-esrgan-x4plus-anime-4b32f/resolve/master/RealESRGAN_x4plus_anime_4B32F.onnx"
+      ],
+      "sha256": ""
+    }
+  ]
+}

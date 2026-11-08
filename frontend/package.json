@@ -1,0 +1,28 @@
+{
+  "name": "chronos-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chronos 超分工作站 — Wails webview UI",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "3.5.45"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "autoprefixer": "10.6.2",
+    "postcss": "8.5.32",
+    "tailwindcss": "3.4.19",
+    "typescript": "5.9.3",
+    "vite": "6.4.5",
+    "vitest": "3.2.7",
+    "vue-tsc": "2.2.12"
+  },
+  "packageManager": "pnpm@11.28.5"
+}

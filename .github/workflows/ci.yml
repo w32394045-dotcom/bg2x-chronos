@@ -1,0 +1,440 @@
+# Project Chronos - main CI pipeline.
+#
+# Jobs and the artifacts they publish:
+#   native-linux       -> native-linux       (libchronos.so, chronos_native_cli, headers)
+#   native-windows     -> native-windows     (chronos.dll, libchronos.dll.a, chronos_native_cli.exe, headers)
+#   go                 -> (no artifact)      go vet / go test on ubuntu + windows
+#   native-integration -> (no artifact)      cgo tests + headless CLI smoke on both OSes
+#   frontend           -> frontend-dist      frontend/dist
+#   package            -> chronos-linux / chronos-windows (only main + manual dispatch)
+#
+# NOTE on Linux + cgo: the Wails Linux webview bindings are cgo-only
+# (gtk+-3.0 via pkg-config), so a CGO_ENABLED=0 build of the root package cannot
+# work on Ubuntu. The Linux `go` job therefore installs the GTK/WebKit dev
+# packages and runs with CGO_ENABLED=1 and the `webkit2_41` tag (Ubuntu 24.04).
+# The pure-Go fallback engine is still exercised because `chronos_native` is not
+# passed there. Windows has no cgo requirement, so it keeps CGO_ENABLED=0.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CGO_ENABLED: "1"
+
+jobs:
+  # ---------------------------------------------------------------- native
+  native-linux:
+    name: native-linux (gcc + ctest + ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ pkg-config
+
+      - name: Configure (Release)
+        run: cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build native/build --parallel
+
+      - name: ctest
+        run: ctest --test-dir native/build --output-on-failure
+
+      - name: Configure sanitizers (ASan + UBSan)
+        run: >-
+          cmake -S native -B native/build-asan -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCHRONOS_BUILD_TESTS=ON
+          -DCHRONOS_SANITIZE=ON
+
+      - name: Build sanitizers
+        run: cmake --build native/build-asan --parallel
+
+      - name: ctest under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir native/build-asan --output-on-failure
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/native-linux/native/build artifacts/native-linux/native/include
+          cp native/build/libchronos.so artifacts/native-linux/native/build/
+          cp native/build/chronos_native_cli artifacts/native-linux/native/build/
+          cp -R native/include/. artifacts/native-linux/native/include/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux
+          path: artifacts/native-linux
+          if-no-files-found: error
+          retention-days: 7
+
+  native-windows:
+    name: native-windows (MSYS2 UCRT64 + ctest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure (Release)
+        run: cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build native/build
+
+      - name: ctest
+        run: ctest --test-dir native/build --output-on-failure
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/native-windows/native/build artifacts/native-windows/native/include
+          cp native/build/chronos.dll artifacts/native-windows/native/build/
+          cp native/build/libchronos.dll.a artifacts/native-windows/native/build/
+          cp native/build/chronos_native_cli.exe artifacts/native-windows/native/build/
+          cp -R native/include/. artifacts/native-windows/native/include/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows
+          path: artifacts/native-windows
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------- go
+  go:
+    name: go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install Linux GUI build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
+
+      - name: go vet (linux, cgo + webkit2_41 for the desktop package)
+        if: runner.os == 'Linux'
+        run: CGO_ENABLED=1 go vet -tags webkit2_41 ./...
+
+      - name: go test (linux, cgo + webkit2_41)
+        if: runner.os == 'Linux'
+        run: CGO_ENABLED=1 go test -tags webkit2_41 ./... -count=1
+
+      - name: go test -race (linux)
+        if: runner.os == 'Linux'
+        run: CGO_ENABLED=1 go test -tags webkit2_41 -race ./... -count=1
+
+      - name: go vet (windows)
+        if: runner.os == 'Windows'
+        run: CGO_ENABLED=0 go vet ./...
+
+      - name: go test (windows)
+        if: runner.os == 'Windows'
+        run: CGO_ENABLED=0 go test ./... -count=1
+
+  # ------------------------------------------------- native <-> go bridge
+  native-integration:
+    name: native-integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [native-linux, native-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CGO_ENABLED: "1"
+      LD_LIBRARY_PATH: native/build
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install MSYS2 gcc for cgo (windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+
+      - name: Download native-linux
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux
+          path: .
+
+      - name: Download native-windows
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: native-windows
+          path: .
+
+      - name: Put chronos.dll on PATH (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "$PWD\native\build" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: go test -tags chronos_native (linux)
+        if: runner.os == 'Linux'
+        run: go test -tags chronos_native ./internal/engine/... -count=1
+
+      - name: go test -tags chronos_native (windows)
+        if: runner.os == 'Windows'
+        run: go test -tags chronos_native ./internal/engine/... -count=1
+
+      - name: Build headless CLI
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            go build -tags chronos_native -o chronos.exe ./cmd/chronos
+          else
+            go build -tags chronos_native -o chronos ./cmd/chronos
+          fi
+
+      - name: Smoke test (linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/ubuntu-smoke.sh ./chronos
+
+      - name: Smoke test (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows-smoke.ps1 -CliPath .\chronos.exe
+
+  # -------------------------------------------------------------- frontend
+  frontend:
+    name: frontend (pnpm + vitest + vite build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm test
+        run: pnpm test
+
+      - name: pnpm build
+        run: pnpm build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  # --------------------------------------------------------------- package
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [native-linux, native-windows, go, native-integration, frontend]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CGO_ENABLED: "1"
+      VERSION: "0.1.0"
+      LD_LIBRARY_PATH: native/build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install MSYS2 toolchain (windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Install Wails CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+
+      - name: Build native library (linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=OFF
+          cmake --build native/build --parallel
+
+      - name: Build native library (windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=OFF
+          cmake --build native/build
+
+      - name: Frontend dependencies
+        shell: bash
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # Releases must ship the native engine; `chronos_native` is passed so the
+      # cgo engine is compiled in. The .so/.dll is installed next to the binary
+      # (libs/libchronos.so on Linux, chronos.dll on Windows).
+      - name: wails build (linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          wails build -clean -tags "webkit2_41 chronos_native" \
+            -ldflags "-X main.version=${VERSION}"
+
+      - name: wails build (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          wails build -clean -tags "chronos_native" -platform windows/amd64 \
+            -ldflags "-X main.version=${VERSION}"
+
+      - name: Package .deb + .tar.gz (linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-packages
+          VERSION="${VERSION}" OUT_DIR=dist-packages bash scripts/package-linux.sh
+
+      - name: Package .zip (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "dist-packages\chronos-$env:VERSION-windows-amd64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $exe = Get-ChildItem -Path build/bin -Filter *.exe -ErrorAction SilentlyContinue |
+            Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $exe) { throw "wails output not found under build/bin" }
+          Copy-Item $exe.FullName (Join-Path $stage "chronos.exe")
+          Copy-Item native/build/chronos.dll $stage
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "models") | Out-Null
+          Copy-Item internal/models/registry.json (Join-Path $stage "models")
+          foreach ($f in @("README.md", "LICENSE")) {
+            if (Test-Path $f) { Copy-Item $f $stage }
+          }
+          Compress-Archive -Path (Join-Path $stage "*") `
+            -DestinationPath "dist-packages\chronos-$env:VERSION-windows-amd64.zip" -Force
+
+      - name: Checksums (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-packages
+          sha256sum ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os == 'Linux' && 'chronos-linux' || 'chronos-windows' }}
+          path: dist-packages/*
+          if-no-files-found: error
+          retention-days: 14

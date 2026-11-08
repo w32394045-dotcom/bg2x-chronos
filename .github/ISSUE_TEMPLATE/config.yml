@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Build and CI documentation
+    url: https://github.com/w32394045-dotcom/bg2x-chronos/blob/main/docs/CI.md
+    about: How to build locally, which toolchains CI uses, and how to reproduce a CI failure.
+  - name: Architecture and contracts
+    url: https://github.com/w32394045-dotcom/bg2x-chronos/blob/main/docs/ARCHITECTURE.md
+    about: Layer boundaries, threading model and ADRs before reporting a design issue.
+  - name: Model registry and conversion
+    url: https://github.com/w32394045-dotcom/bg2x-chronos/blob/main/docs/MODELS.md
+    about: Model ids, licenses, and ONNX to OpenVINO IR conversion.

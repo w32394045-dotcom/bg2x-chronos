@@ -1,0 +1,153 @@
+/**
+ * Chronos 跨语言接口契约 v1 的 TypeScript 镜像。
+ *
+ * 单一事实来源：docs/CONTRACTS.md §3.2 / §3.3 / §5。
+ * 字段名与 Go struct 的 json tag 逐字对应（camelCase）。字段只增不删：
+ * 新增字段在 UI 侧一律按可选处理，缺失时使用安全默认值。
+ */
+
+/** 后端 id 字符串：openvino | stub | go-lanczos（契约 §1 / §3.2）。 */
+export type EngineBackend = 'openvino' | 'stub' | 'go-lanczos' | (string & {})
+
+/** 模型类别（契约 §3.2 ModelInfo.kind）。 */
+export type ModelKind = 'photo' | 'anime' | 'compressed' | 'general' | (string & {})
+
+/** 进度事件种类（契约 §3.2 ProgressEvent.kind）。 */
+export type ProgressKind =
+  | 'queued'
+  | 'started'
+  | 'progress'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+  | (string & {})
+
+/** 日志级别（契约 §3.2 LogEvent.level）。 */
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | (string & {})
+
+export interface EngineInfo {
+  /** "openvino" | "stub" | "go-lanczos" */
+  backend: string
+  /** "GPU" | "CPU" | "n/a" */
+  device: string
+  detail: string
+  /** C++ ABI 版本，当前为 1 */
+  abiVersion: number
+}
+
+export interface AppInfo {
+  version: string
+  commit: string
+  buildTime: string
+  goVersion: string
+  /** 例如 "windows/amd64" */
+  platform: string
+  engine: EngineInfo
+  dataDir: string
+  modelDir: string
+  outputDir: string
+  /** 硬上限 8 */
+  maxConcurrency: number
+  /** chronos 原生库是否加载成功 */
+  nativeLoaded: boolean
+}
+
+export interface ModelInfo {
+  id: string
+  name: string
+  /** 模型原生倍率 */
+  scale: number
+  /** "photo" | "anime" | "compressed" | "general" */
+  kind: string
+  description: string
+  sizeMb: number
+  installed: boolean
+  path: string
+  /** 首选下载源 */
+  url: string
+}
+
+export interface InhibitRequest {
+  /** 阻止系统睡眠 */
+  sleep: boolean
+  /** 阻止关闭显示器 */
+  display: boolean
+  /** 阻止空闲锁屏（Windows 上无法阻止手动 Win+L） */
+  lock: boolean
+  /** 任务结束后自动释放 */
+  autoRelease: boolean
+}
+
+export interface InhibitStatus {
+  active: boolean
+  sleep: boolean
+  display: boolean
+  lock: boolean
+  sleepSupported: boolean
+  displaySupported: boolean
+  lockSupported: boolean
+  /** "windows-execution-state" | "linux-logind+screen-saver" | "unsupported" | ... */
+  driver: string
+  detail: string
+  /** 0 = 未激活；否则为 unix ms 起始时刻 */
+  sinceMs: number
+}
+
+export interface BatchRequest {
+  files: string[]
+  /** "" => stub 引擎（无模型） */
+  modelId: string
+  /** 可选，直接指定本地 .xml/.onnx */
+  modelPath: string
+  scale: number
+  outputDir: string
+  concurrency: number
+  tileSize: number
+  overlap: number
+  threads: number
+  fast: boolean
+  /** 非空且任一位为真 => 任务执行期间保持唤醒 */
+  inhibit: InhibitRequest | null
+}
+
+export interface BatchResult {
+  jobId: string
+  queued: number
+  /** 被跳过的输入（不存在 / 非图片 / 已在队列中的重复路径） */
+  skipped: string[]
+}
+
+export interface ProgressEvent {
+  jobId: string
+  taskId: string
+  file: string
+  /** queued|started|progress|done|failed|cancelled */
+  kind: string
+  /** 0-based，队列序号 */
+  index: number
+  /** tile 进度 */
+  done: number
+  total: number
+  output: string
+  width: number
+  height: number
+  error: string
+  backend: string
+  elapsedMs: number
+}
+
+export interface JobSummary {
+  jobId: string
+  total: number
+  completed: number
+  failed: number
+  cancelled: boolean
+  elapsedMs: number
+}
+
+export interface LogEvent {
+  /** debug|info|warn|error */
+  level: string
+  msg: string
+  timeMs: number
+}

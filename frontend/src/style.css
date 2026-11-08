@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --chronos-scroll: #2b3b4d;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 font-sans text-[13px] leading-relaxed text-mute-strong antialiased;
+    background-image:
+      radial-gradient(1100px 520px at 12% -8%, rgba(34, 200, 189, 0.09), transparent 60%),
+      radial-gradient(900px 480px at 92% 0%, rgba(56, 189, 248, 0.07), transparent 62%);
+    background-attachment: fixed;
+    overflow: hidden;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--chronos-scroll) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #26374a;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #35506b;
+    background-clip: padding-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(108, 235, 219, 0.65);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: rgba(34, 200, 189, 0.3);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-line bg-ink-850/85 shadow-panel backdrop-blur-[2px];
+  }
+
+  .panel-head {
+    @apply flex items-center justify-between gap-2 border-b border-line-soft px-3.5 py-2.5;
+  }
+
+  .panel-title {
+    @apply flex items-center gap-2 text-[12px] font-semibold tracking-wide text-mute-strong;
+  }
+
+  .panel-body {
+    @apply px-3.5 py-3;
+  }
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg border border-transparent px-3 py-1.5
+      text-[12.5px] font-medium transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-500 text-ink-950 shadow-glow hover:bg-brand-400 active:bg-brand-600;
+  }
+
+  .btn-ghost {
+    @apply btn border-line text-mute-strong hover:border-line-strong hover:bg-white/[0.04] hover:text-white;
+  }
+
+  .btn-danger {
+    @apply btn border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-md text-mute transition-colors
+      hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium ring-1 ring-inset;
+  }
+
+  .field-label {
+    @apply flex items-center justify-between text-[11.5px] font-medium text-mute;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-line bg-ink-900/80 px-2.5 py-1.5 text-[12.5px] text-mute-strong
+      placeholder:text-mute-soft/70 focus:border-brand-500/60 focus:outline-none;
+  }
+
+  .divider {
+    @apply my-3 h-px w-full bg-line-soft;
+  }
+
+  .kbd {
+    @apply rounded border border-line bg-ink-900 px-1 py-0.5 font-mono text-[10px] text-mute;
+  }
+
+  .switch {
+    @apply relative inline-flex h-[18px] w-[32px] shrink-0 cursor-pointer items-center rounded-full
+      border border-line-strong/60 bg-ink-900 transition-colors duration-150;
+  }
+
+  .switch[data-on='true'] {
+    @apply border-brand-500/60 bg-brand-600/80;
+  }
+
+  .switch-knob {
+    @apply pointer-events-none ml-[2px] h-[12px] w-[12px] rounded-full bg-mute shadow transition-transform duration-150;
+  }
+
+  .switch[data-on='true'] .switch-knob {
+    @apply translate-x-[14px] bg-white;
+  }
+
+  .throbber {
+    @apply inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand-300/30 border-t-brand-300;
+  }
+}
+
+/* 自定义 range：Tailwind 无法直接美化 range thumb，用原生 CSS 变量配色 */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #22c8bd 0%,
+    #22c8bd var(--range-progress, 50%),
+    #1b2836 var(--range-progress, 50%),
+    #1b2836 100%
+  );
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -5px;
+  height: 14px;
+  width: 14px;
+  border-radius: 999px;
+  background: #e9fffa;
+  border: 2px solid #12a5a0;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+
+input[type='range']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

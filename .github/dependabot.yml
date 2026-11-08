@@ -1,0 +1,37 @@
+# Project Chronos - dependency update automation.
+#
+# Weekly, grouped by ecosystem. Native third-party C/C++ code is vendored
+# (native/third_party) and updated manually via the upstream stb releases.
+
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "go"]
+    commit-message:
+      prefix: "deps(go)"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "frontend"]
+    commit-message:
+      prefix: "deps(frontend)"
+    versioning-strategy: increase
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "deps(actions)"

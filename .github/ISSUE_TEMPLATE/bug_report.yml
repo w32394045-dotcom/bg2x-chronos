@@ -1,0 +1,96 @@
+name: Bug report
+description: Report a crash, wrong output, packaging problem or UI defect in Chronos.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please search existing issues first, and check
+        `docs/CI.md` before reporting a build problem - it lists the exact
+        toolchain versions used by CI.
+
+  - type: input
+    id: version
+    attributes:
+      label: Chronos version
+      description: From the About / status bar, or the release tag you downloaded.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Ubuntu 24.04
+        - Other Linux (X11)
+        - Other Linux (Wayland)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Engine backend
+      description: Shown in the status bar / `chronos info`.
+      options:
+        - openvino (CUDA/GPU)
+        - openvino (CPU)
+        - stub (Lanczos)
+        - go-lanczos (native library not loaded)
+        - unknown
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Model id from the model picker, or empty when no model was used.
+      placeholder: "real-esrgan-x4plus"
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Expected vs. actual behaviour. For wrong output, state the input size and expected output size.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add image 640x480 ...
+        2. Select model ...
+        3. Start ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Copy the log console output, or the CLI output when using `chronos upscale`.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I am not reporting a missing model download (big models are never bundled).
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have read the documentation under docs/.
+          required: true
