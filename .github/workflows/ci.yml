@@ -189,7 +189,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     env:
       CGO_ENABLED: "1"
-      LD_LIBRARY_PATH: native/build
+      # Absolute: `go test` changes cwd to the package directory, so a relative
+      # LD_LIBRARY_PATH would not resolve the artifact's native/build.
+      LD_LIBRARY_PATH: ${{ github.workspace }}/native/build
     defaults:
       run:
         shell: bash
