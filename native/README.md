@@ -58,7 +58,7 @@ Linux 下 `libchronos.so` 带 `SONAME libchronos.so.1`，Go 侧用 `rpath=$ORIGI
 | --- | --- | --- |
 | `CHRONOS_WITH_OPENVINO` | OFF | 打开后 `find_package(OpenVINO COMPONENTS Runtime)`，编译真正的 OpenVINO 后端并链接 `openvino::runtime` |
 | `CHRONOS_BUILD_TESTS` | ON | 构建 `chronos_tests` 并注册 ctest |
-| `CHRONOS_SANITIZE` | OFF | GCC/Clang 下追加 `-fsanitize=address,undefined`（含链接） |
+| `CHRONOS_SANITIZE` | OFF | GCC/Clang（Linux/macOS）下追加 `-fsanitize=address,undefined`（含链接）；MinGW 无 libasan，会给出警告并跳过 |
 | `CHRONOS_WARNINGS_AS_ERRORS` | OFF | `-Werror`（MSVC `/WX`） |
 
 始终启用 `-Wall -Wextra`（MSVC `/W4 /permissive-`）；stb 实现单独 TU 静音编译。
@@ -179,7 +179,8 @@ alpha（可选） (w*h + P) 字节 + 重采样 scratch(out_w * h * 4 字节)
 
 ## 测试
 
-`chronos_tests` 使用 `native/tests/harness.h`（无第三方依赖），ctest 按 suite 注册：
+`chronos_tests` 使用 `native/tests/harness.h`（无第三方依赖），共 **51 个用例**，ctest 按 suite
+注册为 10 个测试项：
 
 ```
 native_tiling     分块网格/覆盖无缝隙/边缘 clamp/非法参数/边缘复制
@@ -191,8 +192,14 @@ native_pipeline   文档用例 64x48→128x96(tile32/overlap8/scale2)、常量�
 native_c_api      ABI、backend 名称/可用性、last_error thread-local、options 校验、-1/-4/-6、
                   err 缓冲 NUL 结尾、目录/垃圾文件不抛异常
 native_threads    2 线程 × 2 session 并发、last_error 线程隔离
-native_all        全部跑一遍；native_cli_info 验证 CLI/动态库可加载
+native_all        全部跑一遍
+native_cli_info   动态库可加载 + --info 输出
+native_cli_process 通过 chronos.dll 端到端跑一次真实图片（fixture 由 native_c_api 生成）
 ```
+
+注意：ctest 运行 Windows 版 `chronos_tests.exe` 需要 `C:\Users\ptfm\tools\mingw64\bin` 在 PATH
+（MinGW 运行库；测试程序本身以 `-static` 链接以便无 PATH 也能跑，但 CLI/共享库仍依赖加载器行为）。
+CI 上（Linux g++）无此要求。
 
 ## CLI
 
@@ -203,11 +210,15 @@ chronos_native_cli --in a.png --out b.png [--model m.xml] [--scale 4] [--tile 25
 
 输出为逐行 JSON-ish 事件（`session` / `progress` / `done` / `error`），退出码即 C ABI 返回码。
 `--info` 打印 ABI/version/backend 可用性，可用于 Ubuntu CI 手工验证。
+Windows 上 CLI 先用 `GetCommandLineW` + `CommandLineToArgvW` 取 UTF-16 命令行再转 UTF-8，
+因此中文路径可用（这是 native 树里唯一出现 `windows.h` 的地方，库本身完全可移植）。
 
 ## 已知限制 / Phase 1 范围
 
 * 无 EXIF 方向校正（stb 不支持）；JPEG 输入按解码后的像素处理。
 * alpha 通道不与 RGB 一起走 tile 推理，而是整图重采样后合并（stub/OV 一致）。
 * OpenVINO 后端要求静态输入形状且 H==W；动态 shape / NHWC 模型需先转换。
+  本机未安装 OpenVINO，该 TU 已用桩头文件做过 `-DCHRONOS_WITH_OPENVINO=1 -Wall -Wextra
+  -Werror` 语法校验，但真实链接/推理仍需在带 OpenVINO 的 CI 上验证。
 * 羽化缓冲区为整画布 float（见“峰值内存”），超大图会以参数错误拒绝；分带累加列为后续优化。
 * session 的 cancel 位一旦置位对后续图片保持有效（Go 每个任务应各自 create/free session）。

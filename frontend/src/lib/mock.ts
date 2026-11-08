@@ -180,11 +180,11 @@ function willFail(file: string): boolean {
   return FAIL_HINTS.some((hint) => lower.includes(hint))
 }
 
-function outputPathFor(req: BatchRequest, file: string, index: number): string {
-  const dir = req.outputDir || file.slice(0, Math.max(0, Math.max(file.lastIndexOf('\\'), file.lastIndexOf('/'))))
+function outputPathFor(req: BatchRequest, file: string): string {
+  const slash = Math.max(file.lastIndexOf('\\'), file.lastIndexOf('/'))
+  const dir = req.outputDir || (slash >= 0 ? file.slice(0, slash) : '')
   const base = fileLabel(file).replace(/\.[^.\\/]+$/, '')
-  const ext = 'png'
-  return `${dir}\\${base}_chronos_x${req.scale || 1}.${ext}${index === -1 ? '' : ''}`
+  return `${dir}\\${base}_chronos_x${req.scale || 1}.png`
 }
 
 /** 推进一个模拟任务：按文件串行、按 tile 出进度事件。 */
@@ -259,13 +259,13 @@ function tickJob(job: MockJob): void {
       send('done', {
         done: totalTiles,
         total: totalTiles,
-        output: outputPathFor(jobRequest, file, index),
+        output: outputPathFor(jobRequest, file),
         width: width * (jobRequest.scale || 1),
         height: height * (jobRequest.scale || 1),
       })
       mockEmit('chronos:log', {
         level: 'info',
-        msg: `完成 ${fileLabel(file)} → ${fileLabel(outputPathFor(jobRequest, file, index))}`,
+        msg: `完成 ${fileLabel(file)} → ${fileLabel(outputPathFor(jobRequest, file))}`,
         timeMs: now(),
       })
       job.timer = setTimeout(() => tickJob(job), Math.max(1, Math.round(state.tickMs / 2)))

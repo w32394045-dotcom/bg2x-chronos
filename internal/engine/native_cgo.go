@@ -1,4 +1,4 @@
-﻿//go:build cgo && chronos_native
+//go:build cgo && chronos_native
 
 package engine
 
@@ -6,7 +6,7 @@ package engine
 #cgo CFLAGS: -I${SRCDIR}/../../native/include
 #cgo LDFLAGS: -L${SRCDIR}/../../native/build -lchronos
 #include <stdlib.h>
-#include "chronos.h"
+#include "chronos/chronos.h"
 
 static int chronos_abi(void) { return CHRONOS_ABI_VERSION; }
 */
@@ -132,15 +132,25 @@ func (e *nativeEngine) Process(ctx context.Context, req Request) (Result, error)
 		}
 		return Result{}, CodedError(code, "process", msg)
 	}
+	scale := config.Scale
+	if scale < 1 {
+		scale = 1
+	}
+	tiles := 0
+	if scale > 0 && int(w)%scale == 0 && int(h)%scale == 0 {
+		// Tile count is not part of the frozen C ABI; derive it from the plan.
+		tiles = len(planTiles(int(w)/scale, int(h)/scale, config.TileSize, config.Overlap))
+	}
+	elapsed := time.Since(start)
 	res := Result{
 		Output:    req.Output,
 		Width:     int(w),
 		Height:    int(h),
+		Tiles:     tiles,
 		Backend:   info.Backend,
-		Elapsed:   time.Since(start),
-		ElapsedMs: time.Since(start).Milliseconds(),
+		Elapsed:   elapsed,
+		ElapsedMs: elapsed.Milliseconds(),
 	}
-	_ = config
 	return res, nil
 }
 

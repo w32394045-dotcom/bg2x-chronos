@@ -26,9 +26,8 @@ std::vector<float> BlendAccumulator::axis_weights(int size) {
 }
 
 void BlendAccumulator::reset(int out_w, int out_h, int channels) {
-  /* Patches handed to accumulate() are always RGB (inference runs on RGB); a
-   * single channel is supported for tests/diagnostics. */
-  if (out_w <= 0 || out_h <= 0 || (channels != 1 && channels != 3)) {
+  /* Patches handed to accumulate() are always RGB (inference runs on RGB). */
+  if (out_w <= 0 || out_h <= 0 || channels != 3) {
     throw std::invalid_argument("BlendAccumulator::reset: invalid dimensions");
   }
   out_w_ = out_w;

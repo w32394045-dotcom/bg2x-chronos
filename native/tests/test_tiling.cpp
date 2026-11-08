@@ -6,6 +6,8 @@
  */
 #include <chronos/tiling.h>
 
+#include <chronos/chronos.h>
+
 #include <algorithm>
 #include <cstddef>
 
@@ -165,6 +167,19 @@ TEST(tiling, extract_tile_replicates_edges) {
   CHECK_EQ(at(0, 3, 1), 1);
   CHECK_EQ(at(3, 3, 1), 1);
   CHECK_EQ(at(1, 1, 2), 7);
+}
+
+TEST(tiling, extract_tile_from_gray_source_replicates_channel) {
+  chronos::Image source;
+  source.allocate(2, 2, 1);
+  for (size_t i = 0; i < 4; ++i) source.pixels[i] = 99;
+  std::vector<uint8_t> tile(4 * 4 * 3);
+  chronos::extract_tile_rgb(source, 0, 0, 4, tile.data());
+  for (int i = 0; i < 4 * 4; ++i) {
+    CHECK_EQ(tile[static_cast<size_t>(i) * 3 + 0], 99);
+    CHECK_EQ(tile[static_cast<size_t>(i) * 3 + 1], 99);
+    CHECK_EQ(tile[static_cast<size_t>(i) * 3 + 2], 99);
+  }
 }
 
 TEST(tiling, extract_tile_from_rgba_source_uses_rgb_only) {

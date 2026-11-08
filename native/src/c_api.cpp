@@ -63,12 +63,12 @@ chronos::Options options_from_c(const chronos_options* options, std::string* err
   if (options == nullptr) return result;
   if (options->struct_size != 0 &&
       options->struct_size != static_cast<int>(sizeof(chronos_options))) {
-    set_error(error, "chronos_options.struct_size must be sizeof(chronos_options)");
+    chronos::set_error(error, "chronos_options.struct_size must be sizeof(chronos_options)");
     return result;
   }
   for (int i = 0; i < 4; ++i) {
     if (options->reserved[i] != 0) {
-      set_error(error, "chronos_options.reserved must be zeroed");
+      chronos::set_error(error, "chronos_options.reserved must be zeroed");
       return result;
     }
   }
@@ -92,16 +92,20 @@ const char* chronos_version_string(void) {
 }
 
 const char* chronos_backend_name(int backend) {
-  switch (backend) {
-    case CHRONOS_BACKEND_NONE:
-      return "none";
-    case CHRONOS_BACKEND_STUB:
-      return "stub";
-    case CHRONOS_BACKEND_OPENVINO:
-      return "openvino";
-    default:
-      set_last_error("unknown backend id passed to chronos_backend_name");
-      return "unknown";
+  try {
+    switch (backend) {
+      case CHRONOS_BACKEND_NONE:
+        return "none";
+      case CHRONOS_BACKEND_STUB:
+        return "stub";
+      case CHRONOS_BACKEND_OPENVINO:
+        return "openvino";
+      default:
+        set_last_error("unknown backend id passed to chronos_backend_name");
+        return "unknown";
+    }
+  } catch (...) {
+    return "unknown";
   }
 }
 
@@ -124,7 +128,11 @@ int chronos_backend_available(int backend) {
 
 const char* chronos_last_error(void) {
   /* c_str() never throws and stays valid until this thread calls the API again. */
-  return g_last_error.c_str();
+  try {
+    return g_last_error.c_str();
+  } catch (...) {
+    return "";
+  }
 }
 
 chronos_session* chronos_session_create(const char* model_path, int scale,

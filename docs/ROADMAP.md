@@ -7,9 +7,9 @@
 
 | 阶段 | 主题 | 状态 |
 | --- | --- | --- |
-| Phase 1 | 核心骨架：契约、C++ 算力层、Go 调度、CI | 进行中（收尾） |
+| Phase 1 | 核心骨架：契约、C++ 算力层、Go 调度、CI | 基本完成（待 CI 首跑） |
 | Phase 2 | 模型推理与批量处理 | 进行中 |
-| Phase 3 | 桌面体验、抑制、打包分发 | 进行中（部分就绪） |
+| Phase 3 | 桌面体验、抑制、打包分发 | 基本完成（待安装包实测） |
 | Phase 4 | 性能、生态与平台扩展 | 计划中 |
 
 ---
@@ -21,14 +21,14 @@
 | 交付物 | 状态 | 说明 |
 | --- | --- | --- |
 | `docs/CONTRACTS.md` v1（冻结） | 完成 | C ABI / JSON / 事件契约，改动需同步三端 |
-| C++ 算力层：tile 切片、replicate padding、羽化拼接、取消 | 进行中 | `native/src/{tiling,blending,pipeline,resample}.cpp` 已实现，ctest 用例随实现补齐 |
-| stub 后端（Lanczos3 / `--fast` 双线性） | 进行中 | `backend_stub.cpp`，scale 1..4 |
+| C++ 算力层：tile 切片、replicate padding、羽化拼接、取消 | 完成 | `native/src/{tiling,blending,pipeline,resample}.cpp`；ctest 按套件拆分，Windows 本地已通过 |
+| stub 后端（Lanczos3 / `--fast` 双线性） | 完成 | `backend_stub.cpp`，scale 1..4；CLI 冒烟覆盖 64×48→128×96 |
 | stb_image 图像 IO（无 OpenCV，ADR-001） | 完成 | `native/third_party/stb_*`、`native/src/image.cpp` |
 | C++ 异常不越过 C ABI | 完成 | 所有入口 `try/catch(...)` + `chronos_last_error` 线程局部错误 |
 | Go engine 抽象 + 纯 Go 回退 | 完成 | `internal/engine/{types,provider,fallback,native_cgo,native_stub}.go` |
 | Go 调度（队列、并发上限 8、取消、事件） | 完成 | `internal/scheduler`，含单元测试 |
-| Wails 壳（RPC + 事件） | 进行中 | `wails.json`、`build/` 资源就绪；根包 `main.go`/`app.go` 由 Lead 集成中 |
-| CLI `cmd/chronos` | 进行中 | 子命令契约见 `docs/CI.md` §8；CI 冒烟依赖它 |
+| Wails 壳（RPC + 事件） | 完成 | `main.go` + `app.go` 实现契约 §3 的 App 方法；wails.json / build 资源就位 |
+| CLI `cmd/chronos` | 完成 | `upscale/info/gen/models/inhibit/bench`；Windows 本地冒烟通过 |
 | 前端壳（Vue 3 + Vite + Tailwind，mock 模式） | 完成 | `frontend/src/**` 组件与 `api.ts` 薄封装 |
 | CI（native/Go/集成/前端/打包）+ 本套文档 | 完成 | `.github/workflows/ci.yml`、`scripts/*`、`docs/*` |
 
@@ -40,6 +40,11 @@
 4. `wails build` 在 Linux（webkit2_41）与 Windows 通过，`chronos info` 显示 `stub`；
 5. 前端 `pnpm test` / `pnpm build` 通过，根包能 embed `frontend/dist`。
 
+当前已验证（2026-11-08，Windows 本机）：native CMake 构建 + ctest、
+`go test -tags chronos_native ./internal/engine/...`、`chronos upscale --no-model`
+冒烟（`stub` 与 `go-lanczos` 两种构建）均通过。Linux/ASan 与 GitHub Actions
+首跑仍需 CI 验证（本机无 Linux 环境），因此总状态记为"基本完成"。
+
 ## Phase 2 — 模型推理与批量
 
 | 交付物 | 状态 | 说明 |
@@ -47,7 +52,7 @@
 | OpenVINO 后端（可选编译，ADR-002） | 进行中 | `native/src/backend_openvino.cpp` + CMake `CHRONOS_WITH_OPENVINO`；主 CI 不开启，`openvino.yml` 手动验证 |
 | ONNX / IR 模型加载 + 错误码 `-2` | 进行中 | `chronos_session_create` 模型路径分支；失败回写错误信息 |
 | 模型 registry + 下载/校验 | 完成 | `internal/models`（embed `registry.json`、URL fallback、sha256、缓存目录） |
-| `chronos models list|pull` | 进行中 | 依赖 CLI 根包集成 |
+| `chronos models list|pull` | 完成 | CLI 已实现（另有 path/import/dir）；下载与校验在 `internal/models` |
 | ONNX→IR FP16 转换工具 | 完成 | `scripts/convert_onnx_to_ir.py`（兼容多代 OpenVINO API） |
 | 批量队列、并发 1..8、取消、进度事件 | 完成 | scheduler + provider + 事件，契约 §3.3 |
 | 切块/重叠/线程数高级参数 | 完成 | Config 归一化与校验（`internal/engine/types.go`） |
@@ -62,7 +67,7 @@ CPU 与（有条件的）GPU 上跑通 2x/4x；`chronos info` 报告 `openvino` 
 | 交付物 | 状态 | 说明 |
 | --- | --- | --- |
 | 睡眠/熄屏/空闲锁屏抑制（Windows + Linux） | 完成 | `internal/inhibit` 平台驱动 + 状态机 + 单测，见 `docs/INHIBIT.md` |
-| 抑制 UI（开关、自动释放、平台注意事项） | 进行中 | `frontend/src/components/InhibitCard.vue`，事件 `chronos:inhibit` |
+| 抑制 UI（开关、自动释放、平台注意事项） | 完成 | `InhibitCard.vue` 与 `App.SetInhibit/GetInhibitStatus` 已接通；待真实机器手动验收 |
 | 设置持久化（并发、输出目录、上次模型等） | 完成 | `internal/config`（`settings.json`，损坏安全回退） |
 | 错误恢复（坏图跳过、失败清单、日志） | 进行中 | `BatchResult.skipped` / `ProgressEvent.kind=failed` 已定义，UI 呈现待联调 |
 | Linux 打包（.deb + .tar.gz + SHA256SUMS） | 完成 | `scripts/package-linux.sh`，CI `package` job |
@@ -114,3 +119,4 @@ CPU 与（有条件的）GPU 上跑通 2x/4x；`chronos info` 报告 `openvino` 
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-08 | 初版：Phase 1–4 状态、验收条件、真实限制 |
+| 2026-11-08 | 按仓库实际实现更新 Phase 1/2/3 状态；记录 Windows 本地验证结果 |

@@ -27,7 +27,11 @@ class BlendAccumulator {
  public:
   BlendAccumulator() = default;
 
-  /* Resets to a zeroed accumulator of out_w x out_h x channels (float). */
+  /*
+   * Resets to a zeroed accumulator of out_w x out_h RGB (3 channels) float
+   * buffers. Patches fed to accumulate() are always 3-channel RGB, matching the
+   * inference path (alpha is handled separately by the pipeline).
+   */
   void reset(int out_w, int out_h, int channels);
 
   /*

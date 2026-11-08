@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <stdexcept>
 #include <thread>
 
 #include <openvino/openvino.hpp>
@@ -75,7 +76,7 @@ std::string choose_device(ov::Core& core, int device_index) {
 class OpenVINOBackend final : public IBackend {
  public:
   OpenVINOBackend(const std::string& model_path, int requested_scale, const Options& options)
-      : options_(options), requested_scale_(requested_scale) {
+      : requested_scale_(requested_scale) {
     core_ = ov::Core();
     model_ = core_.read_model(model_path);
     device_ = choose_device(core_, options.device_index);

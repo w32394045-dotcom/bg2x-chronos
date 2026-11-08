@@ -83,7 +83,9 @@ jobs:
         run: |
           set -euo pipefail
           ./native/build-openvino/chronos_native_cli --info | tee openvino-info.txt
-          grep -qi openvino openvino-info.txt
+          # --info prints {"event":"info",...,"backends":{"stub":true,"openvino":true}};
+          # a plain "openvino" grep would also match "openvino":false.
+          grep -q '"openvino":true' openvino-info.txt
 
       - name: Upload info log
         if: always()

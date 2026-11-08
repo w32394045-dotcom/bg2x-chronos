@@ -1,4 +1,4 @@
-package engine
+﻿package engine
 
 import (
 	"context"
@@ -159,17 +159,20 @@ func TestProviderFallbackAndModelRequirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	if p.Info().Native {
-		t.Fatalf("native unexpectedly available in plain Go build: %+v", p.Info())
-	}
 	e, err := p.Acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.Info().Backend != "go-lanczos" {
-		t.Fatalf("backend = %q", e.Info().Backend)
-	}
+	backend := e.Info().Backend
 	p.Release(e)
+	if p.Info().Native {
+		// Built with `-tags chronos_native`: the native stub backend is expected.
+		if backend != "stub" {
+			t.Fatalf("native backend = %q, want stub", backend)
+		}
+	} else if backend != "go-lanczos" {
+		t.Fatalf("fallback backend = %q, want go-lanczos", backend)
+	}
 
 	// A model needs the native core; without it this must be a clear error.
 	if _, err := NewProvider(Config{ModelPath: "/models/x.onnx", Scale: 4}, 1); err == nil {

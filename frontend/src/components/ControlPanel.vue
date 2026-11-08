@@ -80,6 +80,11 @@ function clearOutputDir(): void {
 function toggleFast(): void {
   fast.value = !fast.value
 }
+
+/** 显式函数而非模板内赋值：store 里解构出来的 ref 走 proxyRefs，直接赋值可读性差。 */
+function setScale(value: number): void {
+  scale.value = value
+}
 </script>
 
 <template>
@@ -193,7 +198,7 @@ function toggleFast(): void {
                 ? 'border-brand-500/60 bg-brand-500/10 text-brand-200'
                 : 'border-line bg-ink-900/50 text-mute hover:border-line-strong'
             "
-            @click="scale = choice"
+            @click="setScale(choice)"
           >
             x{{ choice }}
           </button>

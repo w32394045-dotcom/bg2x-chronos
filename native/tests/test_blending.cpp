@@ -6,6 +6,7 @@
  * seam-free gradient reconstruction.
  */
 #include <chronos/blending.h>
+#include <chronos/chronos.h>
 #include <chronos/tiling.h>
 
 #include <algorithm>
@@ -59,10 +60,19 @@ TEST(blending, overlapping_weights_sum_to_constant) {
   CHECK_EQ(plan.cols, 4);
 
   const std::vector<float> sums = axis_weight_sums(plan);
-  /* Regular overlap between tile 0 and tile 24 (output x in [24, 48)) is
-   * covered by exactly two ramps whose sum is constant: overlap * scale + 1. */
-  for (int x = 24; x < 48; ++x) {
+  /* Regular overlap between tile 0 and tile 24: two ramps summing to a constant
+   * (overlap * scale + 1 = 9) for output x in [24, 32). */
+  for (int x = 24; x < 32; ++x) {
     CHECK_NEAR(sums[static_cast<size_t>(x)], 9.0, 1e-6);
+  }
+  /* Same property between tile 24 and tile 48 (x in [48, 56)). */
+  for (int x = 48; x < 56; ++x) {
+    CHECK_NEAR(sums[static_cast<size_t>(x)], 9.0, 1e-6);
+  }
+  /* The last tile is clamped (spacing 16 instead of 24), so its overlap with
+   * tile 48 sums to tile_size - spacing + 1 = 17 there; still a constant. */
+  for (int x = 64; x < 80; ++x) {
+    CHECK_NEAR(sums[static_cast<size_t>(x)], 17.0, 1e-6);
   }
   /* Every pixel has a strictly positive weight (normalisation is safe). */
   for (float sum : sums) CHECK(sum > 0.0f);
@@ -138,18 +148,22 @@ TEST(blending, gradient_survives_weights_bit_exact_scale_one) {
   CHECK_EQ(chronos_test::max_abs_diff(output, source), 0);
 }
 
-TEST(blending, resolve_handles_single_patch_and_single_channel) {
+TEST(blending, resolve_handles_single_patch) {
   chronos::BlendAccumulator accumulator;
-  accumulator.reset(16, 16, 1);
+  accumulator.reset(16, 16, 3);
   const std::vector<float> axis = chronos::BlendAccumulator::axis_weights(16);
-  std::vector<uint8_t> patch(16 * 16, 77);
+  std::vector<uint8_t> patch(16 * 16 * 3, 77);
   accumulator.accumulate(patch.data(), 16, 16, 0, 0, axis);
   chronos::Image output;
   accumulator.resolve(&output);
   CHECK_EQ(output.width, 16);
   CHECK_EQ(output.height, 16);
-  CHECK_EQ(output.channels, 1);
-  for (uint8_t value : output.pixels) CHECK_EQ(value, 77);
+  CHECK_EQ(output.channels, 3);
+  for (size_t i = 0; i < output.pixels.size(); i += 3) {
+    CHECK_EQ(output.pixels[i + 0], 77);
+    CHECK_EQ(output.pixels[i + 1], 77);
+    CHECK_EQ(output.pixels[i + 2], 77);
+  }
 }
 
 TEST(blending, clips_patches_outside_the_canvas) {

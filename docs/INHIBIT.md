@@ -21,18 +21,21 @@
 ```bash
 chronos inhibit status
 chronos inhibit on --sleep --display --lock
-chronos inhibit on --auto-release          # 任务结束后自动释放（Go app 层消费）
+chronos inhibit on --auto-release --duration 10m   # 脚本化：到时/收到信号自动释放
 chronos inhibit off
 ```
 
 - 任一 flag 为真即视为"请求抑制"；`inhibit off` 等价于 `Set({})`，立即释放。
 - `status` 永远以退出码 0 返回，通过 `driver` / `detail` / 各 `*Supported` 字段表达
-  平台能力；只有真正的操作失败（例如启用的系统调用失败）才返回非 0 退出码。
+  平台能力；只有真正的操作失败（例如启用系统调用失败）才返回非 0 退出码。
+- `--auto-release` 只是把 `InhibitRequest.autoRelease` 置位（契约 §3.2）；真正的
+  "任务结束自动释放"由 app 层在 job 结束时调用 `Set({})` 并推送 `chronos:inhibit`。
+  命令行自身则一直持有，直到 `--duration` 到期、Ctrl+C 或进程退出。
 - UI 的抑制卡片显示 `active / sleep / display / lock / driver / sinceMs / detail`，
   不支持的能力置灰并展示 `detail` 的原因。
 
-> 命令行 flag 由 `cmd/chronos`（Lead 负责）实现，本文按上述契约描述；若 CLI 增加
-> 别名（如 `--autoRelease`），以 CLI 的 `--help` 为准。
+> 命令行具体 flag（含 `--sleep/--display/--lock/--auto-release/--duration/--reason/--json`）
+> 以 `cmd/chronos --help` 为准；本文描述的是行为契约。
 
 ## 3. 状态与语义
 

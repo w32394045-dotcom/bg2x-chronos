@@ -10,13 +10,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/config"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/engine"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/inhibit"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/models"
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/scheduler"
+)
+
+// Linker-injected build metadata (see .github/workflows/ci.yml).
+var (
+	version   = "0.1.0"
+	commit    = "dev"
+	buildTime = "unknown"
 )
 
 // ---- JSON payloads (must stay in sync with docs/CONTRACTS.md §3.2) ----------
@@ -418,9 +425,9 @@ func (a *App) PickImages() []string {
 	if a.ctx == nil {
 		return nil
 	}
-	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+	files, err := wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "选择要超分的图片",
-		Filters: []runtime.FileFilter{{
+		Filters: []wailsruntime.FileFilter{{
 			DisplayName: "图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)",
 			Pattern:     "*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp",
 		}},
@@ -436,7 +443,7 @@ func (a *App) PickOutputDir() string {
 	if a.ctx == nil {
 		return ""
 	}
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择输出目录"})
+	dir, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{Title: "选择输出目录"})
 	if err != nil {
 		return ""
 	}
@@ -477,7 +484,7 @@ func (a *App) forwardEvents() {
 	for ev := range manager.Events() {
 		if ev.Kind == "job-done" {
 			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "chronos:job", JobSummary{
+				wailsruntime.EventsEmit(a.ctx, "chronos:job", JobSummary{
 					JobID:     ev.JobID,
 					Total:     ev.Total,
 					Completed: ev.Completed,
@@ -493,7 +500,7 @@ func (a *App) forwardEvents() {
 		if a.ctx == nil {
 			continue
 		}
-		runtime.EventsEmit(a.ctx, "chronos:progress", ProgressEvent{
+		wailsruntime.EventsEmit(a.ctx, "chronos:progress", ProgressEvent{
 			JobID:     ev.JobID,
 			TaskID:    ev.TaskID,
 			File:      ev.File,
@@ -556,7 +563,7 @@ func (a *App) logLocked(level, msg string) {
 		_, _ = a.logFile.WriteString(line)
 	}
 	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "chronos:log", LogEvent{Level: level, Msg: msg, TimeMs: time.Now().UnixMilli()})
+		wailsruntime.EventsEmit(a.ctx, "chronos:log", LogEvent{Level: level, Msg: msg, TimeMs: time.Now().UnixMilli()})
 	}
 }
 
@@ -576,7 +583,7 @@ func (a *App) emitInhibitStatusLocked(status InhibitStatus) {
 	if a.ctx == nil {
 		return
 	}
-	runtime.EventsEmit(a.ctx, "chronos:inhibit", status)
+	wailsruntime.EventsEmit(a.ctx, "chronos:inhibit", status)
 }
 
 func toInhibitStatus(st inhibit.Status) InhibitStatus {

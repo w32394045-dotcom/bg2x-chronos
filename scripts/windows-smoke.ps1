@@ -163,11 +163,15 @@ print("[smoke] PASS output PNG is %dx%d" % (width, height))
     Write-Log "PASS inhibit status"
 
     # --- 4. info must describe the engine backend ------------------------
+    # `chronos info` prints an `engine: <backend> device=...` line; backend is one
+    # of openvino / stub / go-lanczos (see internal/engine/types.go).
     Write-Log "running: chronos info"
     $info = (& $cliFull info 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) { Fail "info exited with $LASTEXITCODE" }
     Write-Host $info
-    if ($info -notmatch "backend") { Fail "info did not print a backend line" }
+    if ($info -notmatch "engine:\s*(stub|openvino|go-lanczos)") {
+        Fail "info did not print an engine/backend line"
+    }
     Write-Log "PASS info reports an engine backend"
 
     Write-Host ""

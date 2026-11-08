@@ -118,10 +118,13 @@ log "running: chronos inhibit status"
 log "PASS inhibit status"
 
 # --- 4. info must describe the engine backend ------------------------------
+# `chronos info` prints an `engine: <backend> device=...` line; backend is one of
+# openvino / stub / go-lanczos (see internal/engine/types.go).
 log "running: chronos info"
 INFO="$("${BIN}" info 2>&1)" || fail "info exited non-zero"
 printf '%s\n' "${INFO}"
-printf '%s\n' "${INFO}" | grep -qi 'backend' || fail "info did not print a backend line"
+printf '%s\n' "${INFO}" | grep -qE 'engine:[[:space:]]*(stub|openvino|go-lanczos)' \
+  || fail "info did not print an engine/backend line"
 log "PASS info reports an engine backend"
 
 printf '\n[smoke] ALL CHECKS PASSED\n'

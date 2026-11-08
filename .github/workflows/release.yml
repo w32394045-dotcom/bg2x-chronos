@@ -1,4 +1,4 @@
-# Project Chronos - release pipeline.
+﻿# Project Chronos - release pipeline.
 #
 # Triggers:
 #   * push of a tag matching v*  (e.g. git tag v0.2.0 && git push origin v0.2.0)
@@ -77,7 +77,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.28.5
           run_install: false
 
       - uses: actions/setup-node@v4
@@ -97,7 +97,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          # Pin to the go.mod version; @latest could resolve to Wails v3 and
+          # change the build flags silently.
+          WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
           echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
 
       - name: Build native library
@@ -149,7 +152,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.28.5
           run_install: false
 
       - uses: actions/setup-node@v4
@@ -170,12 +173,17 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
 
+      # Git Bash cannot append to the Windows-style GITHUB_PATH command file,
+      # so the PATH update happens in PowerShell on Windows (see docs/CI.md).
       - name: Install Wails CLI
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
-          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+          $ErrorActionPreference = "Stop"
+          $wailsVersion = (go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:GITHUB_PATH -Value "$(go env GOPATH)\bin"
 
       - name: Build native library
         shell: msys2 {0}

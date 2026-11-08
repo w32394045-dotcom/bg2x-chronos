@@ -82,8 +82,10 @@ else()
 endif()
 
 if(CHRONOS_SANITIZE)
-  if(MSVC)
-    message(WARNING "CHRONOS_SANITIZE is only supported for GCC/Clang builds")
+  if(MSVC OR MINGW)
+    # MinGW-w64 ships no libasan and MSVC uses a different sanitizer mechanism.
+    message(WARNING "CHRONOS_SANITIZE is only supported for Linux/macOS GCC/Clang builds; "
+                    "sanitizer flags are disabled for this toolchain")
   else()
     set(CHRONOS_SANITIZE_FLAGS -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_compile_options(chronos_objects PRIVATE ${CHRONOS_SANITIZE_FLAGS})
@@ -101,6 +103,11 @@ endif()
 set_target_properties(chronos PROPERTIES
     OUTPUT_NAME chronos
     WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+if(WIN32)
+  # Contract: the DLL shipped next to the Go executable is `chronos.dll`
+  # (MinGW would otherwise name it libchronos.dll).
+  set_target_properties(chronos PROPERTIES PREFIX "")
+endif()
 if(UNIX AND NOT APPLE)
   set_target_properties(chronos PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
 endif()
@@ -148,6 +155,9 @@ if(CHRONOS_BUILD_TESTS)
       "${CMAKE_CURRENT_SOURCE_DIR}/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(chronos_tests PRIVATE chronos_static)
+  if(MINGW)
+    target_link_options(chronos_tests PRIVATE -static)
+  endif()
   if(CHRONOS_SANITIZE AND NOT MSVC)
     target_compile_options(chronos_tests PRIVATE ${CHRONOS_SANITIZE_FLAGS})
     target_link_options(chronos_tests PRIVATE ${CHRONOS_SANITIZE_FLAGS})
@@ -161,6 +171,16 @@ if(CHRONOS_BUILD_TESTS)
   add_test(NAME native_cli_info COMMAND chronos_native_cli --info)
   set_tests_properties(native_cli_info PROPERTIES
       PASS_REGULAR_EXPRESSION "stub.*true")
+
+  # End-to-end through the shared library: the c_api suite writes the fixture,
+  # then the CLI (linked against chronos.dll) upscales it.
+  add_test(NAME native_cli_process COMMAND chronos_native_cli
+      --in chronos_cli_fixture.png --out chronos_cli_fixture_out.png
+      --scale 2 --tile 16 --overlap 4 --threads 2)
+  set_tests_properties(native_cli_process PROPERTIES
+      FIXTURES_REQUIRED chronos_cli_fixture
+      PASS_REGULAR_EXPRESSION "done")
+  set_tests_properties(native_c_api PROPERTIES FIXTURES_SETUP chronos_cli_fixture)
 endif()
 
 # --- install ----------------------------------------------------------------

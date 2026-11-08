@@ -124,9 +124,16 @@ void extract_tile_rgb(const Image& src, int x, int y, int tile_size, uint8_t* ds
     for (int i = 0; i < tile_size; ++i) {
       const int sx = clamp_value(x + i, 0, max_x);
       const uint8_t* pixel = src_row + static_cast<size_t>(sx) * static_cast<size_t>(channels);
-      dst_row[i * 3 + 0] = pixel[0];
-      dst_row[i * 3 + 1] = pixel[1];
-      dst_row[i * 3 + 2] = pixel[2];
+      if (channels >= 3) {
+        dst_row[i * 3 + 0] = pixel[0];
+        dst_row[i * 3 + 1] = pixel[1];
+        dst_row[i * 3 + 2] = pixel[2];
+      } else {
+        /* Grayscale (optionally gray+alpha): replicate the single channel. */
+        dst_row[i * 3 + 0] = pixel[0];
+        dst_row[i * 3 + 1] = pixel[0];
+        dst_row[i * 3 + 2] = pixel[0];
+      }
     }
   }
 }

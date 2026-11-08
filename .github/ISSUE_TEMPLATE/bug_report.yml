@@ -85,7 +85,9 @@ body:
     attributes:
       label: Checks
       options:
-        - label: I am not reporting a missing model download (big models are never bundled).
+        - label: I reproduced this with a small image (not a several-hundred-megabyte batch).
+        - label: I included the engine backend and OS fields above.
+        - label: I understand that model weights are not bundled and are downloaded on demand.
 
   - type: checkboxes
     id: terms

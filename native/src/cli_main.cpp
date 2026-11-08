@@ -18,9 +18,21 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+/* Windows only: recover the UTF-16 command line and convert it to UTF-8 so
+ * paths with non-ASCII characters (e.g. Chinese folder names) survive. The
+ * MinGW CRT would otherwise narrow argv using the ANSI code page. This is the
+ * only place in the native tree that touches windows.h; the library itself
+ * stays fully portable. */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 namespace {
 
@@ -38,6 +50,36 @@ struct CliArgs {
   bool help = false;
   bool version = false;
 };
+
+#if defined(_WIN32)
+std::string utf8_from_wide(const wchar_t* text) {
+  if (text == nullptr || *text == L'\0') return std::string();
+  const int length = static_cast<int>(std::wcslen(text));
+  const int needed =
+      ::WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0, nullptr, nullptr);
+  if (needed <= 0) return std::string();
+  std::string result(static_cast<size_t>(needed), '\0');
+  ::WideCharToMultiByte(CP_UTF8, 0, text, length, &result[0], needed, nullptr, nullptr);
+  return result;
+}
+
+std::vector<std::string> collect_arguments(int argc, char** argv) {
+  (void)argc;
+  (void)argv;
+  std::vector<std::string> arguments;
+  int count = 0;
+  wchar_t** wide = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+  if (wide == nullptr) return arguments;
+  arguments.reserve(static_cast<size_t>(count));
+  for (int i = 0; i < count; ++i) arguments.push_back(utf8_from_wide(wide[i]));
+  ::LocalFree(wide);
+  return arguments;
+}
+#else
+std::vector<std::string> collect_arguments(int argc, char** argv) {
+  return std::vector<std::string>(argv, argv + argc);
+}
+#endif
 
 std::string json_escape(const std::string& value) {
   std::string escaped;
@@ -102,19 +144,19 @@ bool parse_int(const char* text, int* value) {
   return true;
 }
 
-bool parse_args(int argc, char** argv, CliArgs* args, std::string* error) {
-  for (int i = 1; i < argc; ++i) {
-    const std::string argument = argv[i];
+bool parse_args(const std::vector<std::string>& argv, CliArgs* args, std::string* error) {
+  for (size_t i = 1; i < argv.size(); ++i) {
+    const std::string& argument = argv[i];
     const bool wants_value = argument == "--in" || argument == "--out" ||
                              argument == "--model" || argument == "--scale" ||
                              argument == "--tile" || argument == "--overlap" ||
                              argument == "--threads";
     if (wants_value) {
-      if (i + 1 >= argc) {
+      if (i + 1 >= argv.size()) {
         *error = "missing value for " + argument;
         return false;
       }
-      const char* value = argv[++i];
+      const std::string& value = argv[++i];
       if (argument == "--in") {
         args->in_path = value;
       } else if (argument == "--out") {
@@ -123,7 +165,7 @@ bool parse_args(int argc, char** argv, CliArgs* args, std::string* error) {
         args->model_path = value;
       } else {
         int parsed = 0;
-        if (!parse_int(value, &parsed)) {
+        if (!parse_int(value.c_str(), &parsed)) {
           *error = "invalid integer for " + argument + ": " + value;
           return false;
         }
@@ -169,9 +211,10 @@ void print_info() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  const std::vector<std::string> arguments = collect_arguments(argc, argv);
   CliArgs args;
   std::string parse_error;
-  if (!parse_args(argc, argv, &args, &parse_error)) {
+  if (!parse_args(arguments, &args, &parse_error)) {
     std::fprintf(stderr, "{\"event\":\"error\",\"code\":%d,\"message\":\"%s\"}\n",
                  CHRONOS_ERR_PARAM, json_escape(parse_error).c_str());
     print_usage();

@@ -120,6 +120,7 @@ export function useChronos() {
 
   let toastSeq = 0
   let disposed = false
+  let subscribed = false
   const unsubscribers: Array<() => void> = []
   const toastTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -273,6 +274,8 @@ export function useChronos() {
   }
 
   function subscribeEvents(): void {
+    if (subscribed || disposed) return
+    subscribed = true
     unsubscribers.push(onEvent('chronos:progress', handleProgress))
     unsubscribers.push(onEvent('chronos:job', handleJob))
     unsubscribers.push(onEvent('chronos:log', (entry) => {

@@ -119,7 +119,8 @@ go test ./... -count=1
 
 冒烟脚本不下载任何模型：用 python 标准库（zlib+struct）现场生成 64×48 RGB PNG，
 `chronos upscale -i in.png -o out.png -s 2 --no-model` 后解析输出 PNG 的 IHDR，断言
-128×96；再检查 `chronos inhibit status` 退出码为 0、`chronos info` 输出含 backend 行。
+128×96；再检查 `chronos inhibit status` 退出码为 0、`chronos info` 输出
+`engine: <stub|openvino|go-lanczos>` 的 backend 行。
 
 ### 3.5 `frontend`（ubuntu-latest）
 
@@ -139,7 +140,9 @@ Linux：
 
 ```bash
 sudo apt-get install -y cmake ninja-build g++ pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# CLI 版本必须与 go.mod 里的 wails 库一致（@latest 可能解析到 v3）
+WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
 cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=OFF
 cmake --build native/build --parallel
 cd frontend && pnpm install --frozen-lockfile && cd ..
@@ -217,7 +220,9 @@ cmake -S native -B native/build-openvino -G Ninja \
       -DCHRONOS_WITH_OPENVINO=ON -DOpenVINO_DIR=$(find /usr -name OpenVINOConfig.cmake ...)
 cmake --build native/build-openvino --parallel --target chronos_native_cli
 ./native/build-openvino/chronos_native_cli --info | tee openvino-info.txt
-grep -qi openvino openvino-info.txt
+# --info 是 JSON：{"backends":{"stub":true,"openvino":true}}；直接 grep openvino
+# 会误匹配 "openvino":false，必须匹配 true。
+grep -q '"openvino":true' openvino-info.txt
 ```
 
 替代方案：从 `https://storage.openvinotoolkit.org/repositories/openvino/packages/`
@@ -275,7 +280,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows-smoke.ps1 -CliPath
 ### Wails 桌面构建
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# 版本与 go.mod 对齐，避免 @latest 解析到 Wails v3
+WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
 export PATH="$PATH:$(go env GOPATH)/bin"
 
 # Linux（Ubuntu 24.04；webkit2gtk-4.1 必须加 webkit2_41）
@@ -305,22 +312,30 @@ wails build -clean -tags "chronos_native" -platform windows/amd64 -ldflags "-X m
 | `chronos info` 显示 `go-lanczos` | 构建时没带 `chronos_native`（或未链接原生库）；AI 模型无法加载 |
 | UI 显示抑制 `unsupported` | 平台无驱动（macOS）或 Linux 无 systemd-inhibit/会话 D-Bus，见 `docs/INHIBIT.md` |
 
-## 8. 对 Lead 负责文件的假设
+## 8. 与 Lead 负责文件的接口约定
 
-工作流与脚本依赖以下由 Lead/其他 agent 维护的约定；若实现变更，必须同步更新
-`.github/workflows/*.yml`、`scripts/*` 与本文档：
+工作流与脚本依赖以下由 Lead/其他 agent 维护的约定（2026-11-08 已对照仓库核对；
+若实现变更，必须同步更新 `.github/workflows/*.yml`、`scripts/*` 与本文档）：
 
-- 根包：`main.go` + `app.go`，Wails v2，`wails.json`（`outputfilename: chronos`，
-  `frontend:install: pnpm install`，`frontend:build: pnpm build`）。
-- 版本注入：`-X main.version`（根包变量 `version`）。
-- CLI：`./cmd/chronos`，子命令与 flag 为
-  `upscale -i/--input -o/--output -s/--scale -m/--model --tile --overlap --threads
-  --fast --no-model`、`info`、`models list|pull`、
-  `inhibit on|off|status --sleep --display --lock`、`bench`。
-- 原生：`native/CMakeLists.txt` 目标 `chronos`（`libchronos.so` / `chronos.dll`）、
-  `chronos_tests`（ctest）、`chronos_native_cli`；选项 `CHRONOS_WITH_OPENVINO`、
-  `CHRONOS_BUILD_TESTS`、`CHRONOS_SANITIZE`；Linux 产物在 `native/build/`。
+- 根包：`main.go` + `app.go`，Wails v2（go.mod 当前为 `wails/v2 v2.17.1`），
+  `wails.json`（`outputfilename: chronos`，`frontend:install: pnpm install`，
+  `frontend:build: pnpm build`）。
+- 版本注入：`-X main.version`（根包变量 `version`；另有 `commit` / `buildTime`）。
+  Wails CLI 由 `go list -m` 解析的版本安装，不写死 `@latest`。
+- CLI：`./cmd/chronos`，子命令：
+  `upscale -i/--input -o/--output -s/--scale -m/--model --model-id --tile --overlap
+  --threads --fast --no-model --json`、`info [--json]`、`gen`、
+  `models list|pull|path|import|dir`、
+  `inhibit on|off|status --sleep --display --lock --auto-release --duration --reason --json`、
+  `bench`。冒烟脚本只用 `upscale ... --no-model`、`inhibit status`、`info` 三者。
+- 原生：`native/CMakeLists.txt` 目标 `chronos`（Linux `libchronos.so` 带
+  `SOVERSION 1`；Windows `chronos.dll` + `libchronos.dll.a`）、`chronos_tests`
+  （ctest 套件 `native_*`）、`chronos_native_cli`；选项 `CHRONOS_WITH_OPENVINO`、
+  `CHRONOS_BUILD_TESTS`、`CHRONOS_SANITIZE`；产物在 `native/build/`。
 - Go：模块 `github.com/w32394045-dotcom/bg2x-chronos`，cgo 实现只在
-  `cgo && chronos_native` 下编译；CLI/engine 包路径 `./internal/engine/...`。
+  `cgo && chronos_native` 下编译（`-L${SRCDIR}/../../native/build -lchronos`）；
+  registry 单源是 `internal/models/registry.json`（`go:embed`）。
 - 前端：`frontend/package.json`（`pnpm test`、`pnpm build`）、`pnpm-lock.yaml`、
-  `frontend/dist/.gitkeep`。
+  `frontend/dist/.gitkeep`；`packageManager` 为 pnpm 11。
+- 冒烟测试用到的 CLI 行为：输出必须是 PNG（`-o` 显式 `.png` 或目录）、
+  `inhibit status` 无头环境也返回退出码 0、`info` 打印 `engine: <backend>` 行。

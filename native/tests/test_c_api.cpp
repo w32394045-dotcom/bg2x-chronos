@@ -202,6 +202,15 @@ TEST(c_api, unsupported_scale_and_model_path) {
   CHECK(std::strlen(chronos_last_error()) > 0);
 }
 
+TEST(c_api, writes_cli_fixture_for_end_to_end_test) {
+  /* Consumed by the native_cli_process ctest entry (FIXTURES_REQUIRED). */
+  const chronos::Image fixture = chronos_test::make_constant_rgb(24, 16, 60, 120, 180);
+  chronos_test::write_image_or_fail("chronos_cli_fixture.png", fixture);
+  const chronos::Image loaded = chronos_test::read_image_or_fail("chronos_cli_fixture.png", false);
+  CHECK_EQ(loaded.width, 24);
+  CHECK_EQ(loaded.height, 16);
+}
+
 TEST(c_api, process_success_and_progress) {
   const chronos::Image source = chronos_test::make_constant_rgb(24, 16, 90, 120, 150);
   const std::string input = chronos_test::temp_path("c_api_input.png");

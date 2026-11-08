@@ -187,9 +187,17 @@ TEST(pipeline, session_reuse_processes_images_sequentially) {
   std::string error;
   auto pipeline = create_or_fail(make_options(16, 4, 2, CHRONOS_FLAG_NONE), 2, &error);
 
+  auto expected_tiles = [](int width, int height) {
+    chronos::TilePlan plan;
+    std::string plan_error;
+    if (chronos::plan_tiles(width, height, 16, 4, 2, &plan, &plan_error) != CHRONOS_OK) return -1;
+    return plan.count();
+  };
+
   CHECK_EQ(pipeline->process(first_input, first_output, nullptr, nullptr, &error), CHRONOS_OK);
   CHECK_EQ(pipeline->progress_done(), pipeline->progress_total());
   const int first_total = pipeline->progress_total();
+  CHECK_EQ(first_total, expected_tiles(30, 20));
   const chronos::Image first_result = chronos_test::read_image_or_fail(first_output, false);
   CHECK_EQ(first_result.width, 60);
   CHECK_EQ(first_result.height, 40);
@@ -197,9 +205,7 @@ TEST(pipeline, session_reuse_processes_images_sequentially) {
   CHECK_EQ(pipeline->process(second_input, second_output, nullptr, nullptr, &error), CHRONOS_OK);
   CHECK_EQ(pipeline->progress_done(), pipeline->progress_total());
   const int second_total = pipeline->progress_total();
-  CHECK(first_total > 0);
-  CHECK(second_total > 0);
-  CHECK(first_total != second_total);
+  CHECK_EQ(second_total, expected_tiles(40, 24));
   const chronos::Image second_result = chronos_test::read_image_or_fail(second_output, false);
   CHECK_EQ(second_result.width, 80);
   CHECK_EQ(second_result.height, 48);
