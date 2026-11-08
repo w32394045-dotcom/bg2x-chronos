@@ -1,4 +1,4 @@
-# Project Chronos - OPTIONAL OpenVINO backend verification.
+﻿# Project Chronos - OPTIONAL OpenVINO backend verification.
 #
 # This workflow is manual-only on purpose. It exists to document and verify the
 # real build path for the optional OpenVINO backend:

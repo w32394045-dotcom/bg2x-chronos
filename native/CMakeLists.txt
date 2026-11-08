@@ -1,4 +1,4 @@
-# Project Chronos — native compute layer (C++17)
+﻿# Project Chronos 鈥?native compute layer (C++17)
 #
 # Builds:
 #   chronos             shared library: chronos.dll (Windows) / libchronos.so (Linux)
@@ -28,7 +28,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
       "Install prefix (defaults to native/install)" FORCE)
 endif()
 
-# Keep every artifact in the build root: CONTRACTS §4 links with
+# Keep every artifact in the build root: CONTRACTS 搂4 links with
 # `-L native/build -lchronos` and copies chronos.dll next to the Go executable.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -77,8 +77,11 @@ else()
   if(CHRONOS_WARNINGS_AS_ERRORS)
     target_compile_options(chronos_objects PRIVATE -Werror)
   endif()
-  # stb is third-party: compile it without our warning set.
-  set_source_files_properties(src/stb_impl.cpp PROPERTIES COMPILE_OPTIONS "-w")
+  # stb is third-party: compile it without our warning set. Its JPEG writer has a
+  # known signed left-shift UB, so UBSan's shift check is disabled for that TU
+  # only (the flag is a no-op in non-sanitizer builds).
+  set_source_files_properties(src/stb_impl.cpp PROPERTIES
+      COMPILE_OPTIONS "-w;-fno-sanitize=shift")
 endif()
 
 if(CHRONOS_SANITIZE)
@@ -113,7 +116,7 @@ if(UNIX AND NOT APPLE)
 endif()
 if(MINGW)
   # Self-contained DLL: chronos.dll is shipped next to the Go executable, so it
-  # must not depend on libstdc++/libgcc/libwinpthread DLLs (CONTRACTS §4).
+  # must not depend on libstdc++/libgcc/libwinpthread DLLs (CONTRACTS 搂4).
   target_link_options(chronos PRIVATE -static)
 endif()
 if(CHRONOS_SANITIZE AND NOT MSVC)
