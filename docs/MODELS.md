@@ -74,7 +74,7 @@ bash scripts/fetch-models.sh --force real-cugan-2x
 | macOS（未支持构建） | `~/Library/Caches/Chronos/models` | `~/Library/Application Support/Chronos` |
 
 缓存文件名由 registry 推导：`<id>.onnx`；若 `url` 以 `.xml` 结尾则为 `<id>.xml`
-（`internal/models.models.go: PathFor`）。默认输出目录是 `~/Pictures/Chronos`
+（`internal/models/models.go` 的 `PathFor`）。默认输出目录是 `~/Pictures/Chronos`
 （`config.DefaultOutputDir`），可在 UI 中修改。
 
 ### sha256
