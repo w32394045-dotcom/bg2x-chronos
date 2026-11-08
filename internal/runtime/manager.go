@@ -248,6 +248,8 @@ type Manager struct {
 	total      int64
 	lastErr    string
 	forced     bool
+	// runCommand is overridable in tests (defaults to os/exec).
+	runCommand func(ctx context.Context, exe string, args []string, env []string) ([]byte, error)
 }
 
 // NewManager creates the manager below <dataDir>/runtime and selects the best
@@ -520,9 +522,16 @@ func (m *Manager) Verify(ctx context.Context, exePath, flavor string) error {
 	dir := m.Dir(flavor)
 	verifyCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
-	command := exec.CommandContext(verifyCtx, exePath, "probe", "--json")
-	command.Env = append(os.Environ(), EnvVar+"="+dir)
-	output, err := command.Output()
+	runner := m.runCommand
+	if runner == nil {
+		runner = func(ctx context.Context, exe string, args []string, env []string) ([]byte, error) {
+			cmd := exec.CommandContext(ctx, exe, args...)
+			cmd.Env = env
+			return cmd.Output()
+		}
+	}
+	env := append(os.Environ(), EnvVar+"="+dir)
+	output, err := runner(verifyCtx, exePath, []string{"probe", "--json"}, env)
 	if err != nil {
 		if verifyCtx.Err() != nil {
 			return fmt.Errorf("runtime probe timed out (the candidate runtime may be incompatible): %w", verifyCtx.Err())

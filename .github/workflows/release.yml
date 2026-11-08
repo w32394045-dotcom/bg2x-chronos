@@ -379,6 +379,7 @@ jobs:
         with:
           tag_name: ${{ needs.meta.outputs.tag }}
           name: Chronos ${{ needs.meta.outputs.version }}
+          body_path: docs/RELEASE-NOTES.md
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(needs.meta.outputs.version, '-') }}
