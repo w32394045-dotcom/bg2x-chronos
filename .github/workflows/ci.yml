@@ -80,7 +80,7 @@ jobs:
           cp native/build/chronos_native_cli artifacts/native-linux/native/build/
           cp -R native/include/. artifacts/native-linux/native/include/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-linux
           path: artifacts/native-linux
@@ -125,7 +125,7 @@ jobs:
           cp native/build/chronos_native_cli.exe artifacts/native-windows/native/build/
           cp -R native/include/. artifacts/native-windows/native/include/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-windows
           path: artifacts/native-windows
@@ -287,7 +287,7 @@ jobs:
       - name: pnpm build
         run: pnpm build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
           path: frontend/dist
@@ -432,7 +432,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ runner.os == 'Linux' && 'chronos-linux' || 'chronos-windows' }}
           path: dist-packages/*

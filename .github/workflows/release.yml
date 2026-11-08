@@ -126,7 +126,7 @@ jobs:
           mkdir -p dist-packages
           VERSION="${VERSION}" OUT_DIR=dist-packages bash scripts/package-linux.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: chronos-linux
           path: dist-packages/*
@@ -222,7 +222,7 @@ jobs:
           sha256sum ./*.zip > SHA256SUMS
           cat SHA256SUMS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: chronos-windows
           path: dist-packages/*
