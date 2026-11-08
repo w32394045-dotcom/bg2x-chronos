@@ -5,6 +5,9 @@ package engine
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../native/include
 #cgo LDFLAGS: -L${SRCDIR}/../../native/build -lchronos
+# Linux packages ship the native library in libs/ next to the binary (and in
+# ../lib for the /usr/bin wrapper), so bake those search paths into the binary.
+#cgo linux LDFLAGS: -Wl,-rpath,$ORIGIN/libs -Wl,-rpath,$ORIGIN/../lib
 #include <stdlib.h>
 #include "chronos/chronos.h"
 

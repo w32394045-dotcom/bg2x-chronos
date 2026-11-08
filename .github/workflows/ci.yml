@@ -1,4 +1,4 @@
-﻿# Project Chronos - main CI pipeline.
+# Project Chronos - main CI pipeline.
 #
 # Jobs and the artifacts they publish:
 #   native-linux       -> native-linux       (libchronos.so, chronos_native_cli, headers)
@@ -203,6 +203,7 @@ jobs:
 
       - name: Install MSYS2 gcc for cgo (windows)
         if: runner.os == 'Windows'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -210,6 +211,20 @@ jobs:
           path-type: inherit
           install: >-
             mingw-w64-ucrt-x86_64-gcc
+
+      # cgo needs gcc on PATH for the plain `bash` steps below; the setup action
+      # only exposes its toolchain inside `shell: msys2 {0}` by default.
+      - name: Add UCRT64 gcc to PATH (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin",
+            "C:\msys64\ucrt64\bin"
+          ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "gcc.exe")) }
+          if (-not $candidates) { throw "gcc.exe not found in any candidate MSYS2 UCRT64 location" }
+          Add-Content -Path $env:GITHUB_PATH -Value $candidates[0]
+          Write-Host "added $($candidates[0]) to PATH"
 
       - name: Download native-linux
         if: runner.os == 'Linux'
@@ -337,6 +352,7 @@ jobs:
 
       - name: Install MSYS2 toolchain (windows)
         if: runner.os == 'Windows'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -347,6 +363,20 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+
+      # The Wails build step below runs under Git Bash, so cgo's gcc must be on
+      # PATH outside the MSYS2 shell as well.
+      - name: Add UCRT64 gcc to PATH (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin",
+            "C:\msys64\ucrt64\bin"
+          ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "gcc.exe")) }
+          if (-not $candidates) { throw "gcc.exe not found in any candidate MSYS2 UCRT64 location" }
+          Add-Content -Path $env:GITHUB_PATH -Value $candidates[0]
+          Write-Host "added $($candidates[0]) to PATH"
 
       # NOTE: GitHub's command files are Windows paths on windows-latest and
       # Git Bash cannot append to them (it mangles "C:\..." in redirection), so
