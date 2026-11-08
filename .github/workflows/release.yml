@@ -1,4 +1,4 @@
-﻿# Project Chronos - release pipeline.
+# Project Chronos - release pipeline.
 #
 # Triggers:
 #   * push of a tag matching v*  (e.g. git tag v0.2.0 && git push origin v0.2.0)
@@ -66,7 +66,7 @@ jobs:
     needs: meta
     env:
       VERSION: ${{ needs.meta.outputs.version }}
-      LD_LIBRARY_PATH: native/build
+      LD_LIBRARY_PATH: ${{ github.workspace }}/native/build
     steps:
       - uses: actions/checkout@v4
 
@@ -162,6 +162,7 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install MSYS2 toolchain
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -172,6 +173,19 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+
+      # The Wails build runs under Git Bash, so cgo's gcc must be on PATH outside
+      # the MSYS2 shell as well.
+      - name: Add UCRT64 gcc to PATH
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin",
+            "C:\msys64\ucrt64\bin"
+          ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "gcc.exe")) }
+          if (-not $candidates) { throw "gcc.exe not found in any candidate MSYS2 UCRT64 location" }
+          Add-Content -Path $env:GITHUB_PATH -Value $candidates[0]
+          Write-Host "added $($candidates[0]) to PATH"
 
       # Git Bash cannot append to the Windows-style GITHUB_PATH command file,
       # so the PATH update happens in PowerShell on Windows (see docs/CI.md).
@@ -190,6 +204,11 @@ jobs:
         run: |
           cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCHRONOS_BUILD_TESTS=OFF
           cmake --build native/build
+
+      # Bindings generation compiles+runs a helper linked to chronos.dll.
+      - name: Add native library dir to PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE\native\build"
 
       - name: Frontend dependencies
         shell: bash
