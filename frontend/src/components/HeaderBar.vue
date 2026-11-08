@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import Icon from './Icon.vue'
 import type { ChronosStore } from '@/composables/useChronos'
+import { useModelManager } from '@/composables/useModelManager'
 import { THEME_LABEL, activeTheme, nextTheme, setTheme } from '@/lib/theme'
 
 const props = defineProps<{
@@ -13,15 +14,51 @@ const emit = defineEmits<{ (event: 'toggle-settings'): void }>()
 
 const { appInfo, engineLabel, browserMode, previewMode } = props.store
 
-const version = computed(() => appInfo.value?.version || '0.1.0')
-const engineTone = computed(() => {
+const mm = useModelManager()
+const accelOpen = mm.accelOpen
+const accelStatus = computed(() => mm.accel.value)
+const accelReason = computed(
+  () => accelStatus.value?.fallbackReason || activeEngine.value?.fallbackReason || '',
+)
+const accelAvailable = computed(() => accelStatus.value?.available ?? ['CPU'])
+const accelMode = computed(() => accelStatus.value?.mode ?? 'auto')
+
+const engineToneFallback = computed(() => {
   const backend = appInfo.value?.engine?.backend
   if (!backend) return 'text-mute ring-overlay/10'
-  if (backend === 'openvino') return 'text-brand-300 ring-brand-400/30 bg-brand-500/10'
+  if (backend === 'ort' || backend === 'openvino') return 'text-brand-300 ring-brand-400/30 bg-brand-500/10'
   if (backend === 'stub') return 'text-sky-300 ring-sky-400/25 bg-sky-500/10'
   return 'text-amber-300 ring-amber-400/25 bg-amber-500/10'
 })
 
+/** 真实加速状态：优先用 GetAccelStatus 的 Active，退回启动时的 engine 快照。 */
+const activeEngine = computed(() => mm.accel.value?.active ?? appInfo.value?.engine ?? null)
+const isGpu = computed(() => activeEngine.value?.device === 'GPU')
+const accelLabel = computed(() => {
+  const engine = activeEngine.value
+  if (!engine) return 'n/a'
+  const ep = engine.ep || 'CPU'
+  if (engine.device === 'GPU') return `GPU · ${ep}`
+  return `CPU · ${ep}`
+})
+const accelTone = computed(() => {
+  if (!activeEngine.value) return 'text-mute ring-overlay/10'
+  if (isGpu.value) return 'text-emerald-300 ring-emerald-400/25 bg-emerald-500/10'
+  const reason = mm.accel.value?.fallbackReason || activeEngine.value.fallbackReason || ''
+  if (reason && mm.accel.value?.gpuUsable !== true) return 'text-amber-300 ring-amber-400/25 bg-amber-500/10'
+  return 'text-mute ring-overlay/10'
+})
+const accelTitle = computed(() => {
+  const engine = activeEngine.value
+  if (!engine) return '加速状态未知'
+  const parts = [`后端 ${engine.backend}`, `执行后端 ${engine.ep || 'CPU'}`, `设备 ${engine.device}`]
+  if (engine.deviceName) parts.push(engine.deviceName)
+  const reason = mm.accel.value?.fallbackReason || engine.fallbackReason
+  if (reason) parts.push(`说明：${reason}`)
+  return parts.join(' · ')
+})
+
+const version = computed(() => appInfo.value?.version || '0.1.0')
 const themeIcon = computed(() =>
   activeTheme.value === 'dark' ? 'moon' : activeTheme.value === 'light' ? 'sun' : 'spark',
 )
@@ -31,6 +68,14 @@ const currentTheme = computed(() => activeTheme.value)
 
 function cycleTheme(): void {
   setTheme(nextTheme(activeTheme.value))
+}
+
+function toggleAccel(): void {
+  mm.accelOpen.value = !mm.accelOpen.value
+}
+
+async function setMode(mode: string): Promise<void> {
+  await mm.setAccelMode(mode)
 }
 </script>
 
@@ -73,12 +118,61 @@ function cycleTheme(): void {
       </span>
       <span
         class="chip max-w-[210px] truncate font-mono"
-        :class="engineTone"
+        :class="engineToneFallback"
         :title="appInfo?.engine?.detail || '引擎信息'"
       >
         <Icon name="cpu" :size="11" />
         {{ engineLabel }}
       </span>
+      <div class="relative">
+        <button
+          type="button"
+          class="chip font-mono"
+          :class="accelTone"
+          :title="accelTitle"
+          aria-label="加速状态"
+          @click="toggleAccel"
+        >
+          <Icon :name="isGpu ? 'spark' : 'cpu'" :size="11" />
+          {{ accelLabel }}
+        </button>
+        <div
+          v-if="accelOpen"
+          class="panel absolute right-0 top-9 z-40 w-[268px] p-3 text-[11px] leading-relaxed text-mute"
+        >
+          <div class="mb-1.5 flex items-center justify-between">
+            <span class="font-semibold text-mute-strong">加速状态</span>
+            <span class="chip bg-overlay/5 text-mute-soft ring-overlay/10">{{ accelLabel }}</span>
+          </div>
+          <div class="space-y-1">
+            <div>可用后端：<span class="text-mute-strong">{{ accelAvailable.join(' / ') }}</span></div>
+            <div>设备：<span class="text-mute-strong">{{ activeEngine?.deviceName || '未报告' }}</span></div>
+            <div>加速方式：<span class="text-mute-strong">{{ accelMode === 'cpu' ? '仅 CPU' : '自动' }}</span></div>
+            <div v-if="accelReason" class="text-amber-300">说明：{{ accelReason }}</div>
+          </div>
+          <div class="mt-2.5 grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              class="btn-ghost"
+              :class="accelMode !== 'cpu' ? 'border-brand-500/50 text-brand-300' : ''"
+              @click="setMode('auto')"
+            >
+              自动
+            </button>
+            <button
+              type="button"
+              class="btn-ghost"
+              :class="accelMode === 'cpu' ? 'border-brand-500/50 text-brand-300' : ''"
+              @click="setMode('cpu')"
+            >
+              仅 CPU
+            </button>
+          </div>
+          <p class="mt-2 text-[10px] text-mute-soft">
+            切换只影响新任务；GPU 需要运行时带对应执行后端，否则自动降级为 CPU。
+          </p>
+        </div>
+      </div>
       <button
         type="button"
         class="icon-btn"

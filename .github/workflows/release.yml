@@ -134,13 +134,27 @@ jobs:
           CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli ./cmd/chronos
           ls -l build/bin/chronos-cli
 
+      - name: Fetch ONNX Runtime CPU runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ORT_VERSION=1.24.4
+          ORT_DIR="${RUNNER_TEMP}/ort"
+          mkdir -p "${ORT_DIR}"
+          curl -Lf --retry 3 --retry-delay 2 -o "${ORT_DIR}/ort.tgz" \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
+          tar -xzf "${ORT_DIR}/ort.tgz" -C "${ORT_DIR}" --strip-components=1
+          cp -L "${ORT_DIR}/lib/libonnxruntime.so" "${ORT_DIR}/libonnxruntime.so"
+          echo "ORT_LIB=${ORT_DIR}/libonnxruntime.so" >> "${GITHUB_ENV}"
+          ls -l "${ORT_DIR}/libonnxruntime.so"
+
       - name: Package web tarball + .deb + .tar.gz
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist-packages
           VERSION="${VERSION}" OUT_DIR=dist-packages WEB_BIN=build/bin/chronos-cli \
-            DIST_DIR=frontend/dist bash scripts/package-linux.sh
+            DIST_DIR=frontend/dist ORT_LIB="${ORT_LIB}" bash scripts/package-linux.sh
 
       - uses: actions/upload-artifact@v4
         with:
@@ -242,6 +256,21 @@ jobs:
           CGO_ENABLED=1 go build -tags chronos_native -o build/bin/chronos-cli.exe ./cmd/chronos
           ls -l build/bin/chronos-cli.exe
 
+      - name: Fetch ONNX Runtime CPU runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ortVersion = "1.24.4"
+          $ortDir = Join-Path $env:RUNNER_TEMP "ort-win"
+          $zip = Join-Path $env:RUNNER_TEMP "ort-win.zip"
+          Invoke-WebRequest -UseBasicParsing -Uri `
+            "https://github.com/microsoft/onnxruntime/releases/download/v$ortVersion/onnxruntime-win-x64-$ortVersion.zip" `
+            -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $ortDir -Force
+          $dll = Get-ChildItem -Path $ortDir -Filter onnxruntime.dll -Recurse | Select-Object -First 1
+          if (-not $dll) { throw "onnxruntime.dll not found in the ORT archive" }
+          Add-Content -Path $env:GITHUB_ENV -Value "ORT_DLL=$($dll.FullName)"
+
       - name: Package .zip
         shell: pwsh
         run: |
@@ -270,6 +299,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $stage "web") | Out-Null
           Copy-Item -Path "frontend/dist/*" -Destination (Join-Path $stage "web") -Recurse -Force
           Copy-Item native/build/chronos.dll $stage
+          # ONNX Runtime (dynamic loading) lives in <exeDir>\ort\onnxruntime.dll.
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "ort") | Out-Null
+          Copy-Item $env:ORT_DLL (Join-Path $stage "ort")
+          $ortRoot = Split-Path $env:ORT_DLL -Parent
+          $shared = Get-ChildItem -Path $ortRoot -Filter onnxruntime_providers_shared.dll -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($shared) { Copy-Item $shared.FullName (Join-Path $stage "ort") }
           New-Item -ItemType Directory -Force -Path (Join-Path $stage "models") | Out-Null
           Copy-Item internal/models/registry.json (Join-Path $stage "models")
           foreach ($f in @("README.md", "LICENSE")) {

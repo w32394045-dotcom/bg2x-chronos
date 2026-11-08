@@ -26,11 +26,17 @@ export type ProgressKind =
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | (string & {})
 
 export interface EngineInfo {
-  /** "openvino" | "stub" | "go-lanczos" */
+  /** "ort" | "openvino" | "stub" | "go-lanczos" */
   backend: string
+  /** 执行后端："CPU" | "DML" | "CUDA" | ""（契约 v3） */
+  ep?: string
   /** "GPU" | "CPU" | "n/a" */
   device: string
+  /** 显卡/CPU 型号，可为空 */
+  deviceName?: string
   detail: string
+  /** 想用 GPU 但降级时的真实原因 */
+  fallbackReason?: string
   /** C++ ABI 版本，当前为 1 */
   abiVersion: number
 }
@@ -95,6 +101,78 @@ export interface ModelInfo {
   path: string
   /** 首选下载源 */
   url: string
+  /** v0.3："registry" | "imported" */
+  origin?: string
+  /** 装完自检是否通过 */
+  verified?: boolean
+  license?: string
+  arch?: string
+  /** 是否已有 model.json sidecar */
+  sidecar?: boolean
+  /** 自检失败原因 */
+  failReason?: string
+}
+
+/** 下载进度（chronos:model 事件与 PullModel 返回值）。 */
+export interface ModelPullState {
+  modelId: string
+  /** queued|resolving|downloading|verifying|installing|selftest|done|failed|cancelled */
+  phase: string
+  done: number
+  /** -1 表示服务器未给长度 */
+  total: number
+  error: string
+}
+
+export interface SelfTestCheck {
+  /** load|size|color|seam|perf */
+  name: string
+  ok: boolean
+  detail: string
+}
+
+export interface ModelSelfTest {
+  ok: boolean
+  checks: SelfTestCheck[]
+  diagnostics: string
+}
+
+export interface TensorShape {
+  name: string
+  /** -1 表示动态维度 */
+  dims: number[]
+  dtype: string
+}
+
+export interface ModelDiagnostics {
+  modelId: string
+  opset: number
+  ops: string[]
+  inputs: TensorShape[]
+  outputs: TensorShape[]
+  warnings: string[]
+  error: string
+}
+
+export interface PullModelRequest {
+  modelId: string
+  mirror: string
+}
+
+export interface ImportModelRequest {
+  path: string
+  name: string
+  autoDetect: boolean
+}
+
+/** 加速视图：Active 是实际在用的，其余是这台机器能用的。 */
+export interface AccelStatus {
+  /** "auto" | "cpu" */
+  mode: string
+  active: EngineInfo
+  available: string[]
+  gpuUsable: boolean
+  fallbackReason: string
 }
 
 export interface InhibitRequest {

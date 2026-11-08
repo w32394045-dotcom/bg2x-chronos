@@ -6,6 +6,7 @@
  * 绝不因为缺少 window.go 而崩溃。
  */
 import type {
+  AccelStatus,
   AppInfo,
   BatchRequest,
   BatchResult,
@@ -14,7 +15,10 @@ import type {
   InhibitRequest,
   InhibitStatus,
   JobSummary,
+  ModelDiagnostics,
   ModelInfo,
+  ModelPullState,
+  ModelSelfTest,
   ProgressEvent,
 } from './types'
 import { fileLabel } from './queue'
@@ -526,7 +530,124 @@ export const mockApi: Api = {
     emitLog('debug', `（浏览器预览）枚举目录：${listing.path}（${listing.entries.length} 项）`)
     return listing
   },
+  async PickModelFile() {
+    emitLog('debug', '（浏览器预览）返回示例模型路径')
+    return 'C:\\Users\\Public\\Chronos\\models\\sample.onnx'
+  },
+  async PullModel(req): Promise<ModelPullState> {
+    const model = SAMPLE_MODELS.find((m) => m.id === req.modelId)
+    const total = Math.round((model?.sizeMb || 8) * 1024 * 1024)
+    let done = 0
+    const step = Math.max(1, Math.round(total / 8))
+    const timer = setInterval(() => {
+      done = Math.min(total, done + step)
+      const phase = done >= total ? 'done' : 'downloading'
+      mockEmit('chronos:model', { modelId: req.modelId, phase, done, total, error: '' })
+      if (phase === 'done') {
+        clearInterval(timer)
+        pullTimers.delete(req.modelId)
+        const m = SAMPLE_MODELS.find((x) => x.id === req.modelId)
+        if (m) {
+          m.installed = true
+          m.verified = true
+        }
+      }
+    }, Math.max(1, Math.round(state.tickMs)))
+    pullTimers.set(req.modelId, timer)
+    const initial: ModelPullState = { modelId: req.modelId, phase: 'queued', done: 0, total, error: '' }
+    mockEmit('chronos:model', initial)
+    return initial
+  },
+  async CancelPull(modelId) {
+    const timer = pullTimers.get(modelId)
+    if (!timer) return false
+    clearInterval(timer)
+    pullTimers.delete(modelId)
+    mockEmit('chronos:model', { modelId, phase: 'cancelled', done: 0, total: 0, error: '' })
+    return true
+  },
+  async RemoveModel(modelId) {
+    const model = SAMPLE_MODELS.find((m) => m.id === modelId)
+    if (model) {
+      model.installed = false
+      model.verified = false
+      model.failReason = ''
+    }
+    emitLog('info', `（浏览器预览）已删除模型 ${modelId}`)
+  },
+  async ImportModel(req) {
+    const imported: ModelInfo = {
+      id: `imported-${SAMPLE_MODELS.length + 1}`,
+      name: req.name || '导入模型',
+      scale: 4,
+      kind: 'photo',
+      description: req.path,
+      sizeMb: 12,
+      installed: true,
+      path: req.path,
+      url: '',
+      origin: 'imported',
+      verified: false,
+      license: '',
+      arch: '',
+      sidecar: true,
+      failReason: '',
+    }
+    SAMPLE_MODELS.push(imported)
+    emitLog('info', `（浏览器预览）已导入模型：${imported.name}`)
+    return { ...imported }
+  },
+  async SelfTestModel(modelId): Promise<ModelSelfTest> {
+    const model = SAMPLE_MODELS.find((m) => m.id === modelId)
+    if (model) model.verified = true
+    return {
+      ok: true,
+      checks: [
+        { name: 'load', ok: true, detail: '（模拟）后端 ort · CPU · ort/CPU' },
+        { name: 'size', ok: true, detail: '（模拟）输出 256x256，期望 256x256' },
+        { name: 'color', ok: true, detail: '（模拟）均值 96.4，标准差 52.31' },
+        { name: 'seam', ok: true, detail: '（模拟）tile 256 vs 512：最大像素差 1 LSB' },
+        { name: 'perf', ok: true, detail: '（模拟）412 ms/图' },
+      ],
+      diagnostics: `mock self test for ${modelId}`,
+    }
+  },
+  async GetModelDiagnostics(modelId): Promise<ModelDiagnostics> {
+    return {
+      modelId,
+      opset: 0,
+      ops: [],
+      inputs: [],
+      outputs: [],
+      warnings: ['（浏览器预览）诊断数据为模拟值，真实解析在 P4 提供'],
+      error: '',
+    }
+  },
+  async GetAccelStatus(): Promise<AccelStatus> {
+    return mockAccelStatus()
+  },
+  async SetAccelMode(mode) {
+    mockAccelMode = mode === 'cpu' ? 'cpu' : 'auto'
+    emitLog('info', `（浏览器预览）加速方式：${mockAccelMode}`)
+    return mockAccelStatus()
+  },
 }
+
+/** 浏览器预览的加速状态：永远是 CPU（没有真实运行时）。 */
+let mockAccelMode = 'auto'
+function mockAccelStatus(): AccelStatus {
+  const info = appInfo().engine
+  return {
+    mode: mockAccelMode,
+    active: info,
+    available: ['CPU'],
+    gpuUsable: false,
+    fallbackReason: '（浏览器预览）没有可用的 GPU 执行后端',
+  }
+}
+
+/** 进行中的模拟下载（modelId -> timer）。 */
+const pullTimers = new Map<string, ReturnType<typeof setInterval>>()
 
 /* ------------------------------------------------------------- 测试辅助（导出） */
 

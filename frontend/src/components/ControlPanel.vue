@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import Icon from './Icon.vue'
 import type { ChronosStore } from '@/composables/useChronos'
+import { useModelManager } from '@/composables/useModelManager'
 import {
   CONCURRENCY_SOFT_LIMIT,
   MODEL_KIND_HINT,
@@ -47,6 +48,50 @@ const scaleChoices = [1, 2, 3, 4]
 const modelUnavailable = computed(
   () => !!selectedModel.value && (!selectedModel.value.installed || !selectedModel.value.path),
 )
+
+/* ---- 模型管理（下载 / 取消 / 自检 / 删除），契约 v3 ---- */
+const mm = useModelManager()
+const pullsMap = computed(() => mm.pulls.value)
+const testsMap = computed(() => mm.tests.value)
+const installedCount = computed(() => models.value.filter((model) => model.installed).length)
+const recommendedModel = computed(
+  () =>
+    models.value.find((model) => model.id === 'real-esrgan-animevideov3' && !model.installed) ??
+    models.value.find((model) => !model.installed) ??
+    null,
+)
+const mmError = computed(() => mm.error.value)
+
+function pullOf(id: string) {
+  return pullsMap.value[id] ?? null
+}
+function isPulling(id: string): boolean {
+  const st = pullOf(id)
+  return !!st && !['done', 'failed', 'cancelled'].includes(st.phase)
+}
+function pullPercent(id: string): number {
+  const st = pullOf(id)
+  if (!st || st.total <= 0) return 0
+  return Math.min(100, Math.round((st.done / st.total) * 100))
+}
+function testOf(id: string) {
+  return testsMap.value[id] ?? null
+}
+async function installModel(model: Parameters<typeof mm.install>[0]): Promise<void> {
+  await mm.install(model)
+}
+async function cancelModel(id: string): Promise<void> {
+  await mm.cancel(id)
+}
+async function removeModel(id: string): Promise<void> {
+  await mm.remove(id)
+}
+async function selfTestModel(id: string): Promise<void> {
+  await mm.selfTest(id)
+}
+async function copyModelDiagnostics(id: string): Promise<void> {
+  await mm.copyDiagnostics(id)
+}
 const concurrencyWarn = computed(() => concurrency.value > CONCURRENCY_SOFT_LIMIT)
 const rangeStyle = computed(() => ({
   '--range-progress': `${maxConcurrency.value > 1 ? ((concurrency.value - 1) / (maxConcurrency.value - 1)) * 100 : 0}%`,
@@ -148,41 +193,136 @@ function setScale(value: number): void {
             <p class="mt-0.5 text-[10.5px] text-mute-soft">无 OpenVINO 模型时走纯 CPU 回退，任意倍率稳定输出。</p>
           </button>
 
-          <button
+          <div
+            v-if="installedCount === 0 && recommendedModel"
+            class="rounded-lg border border-brand-500/40 bg-brand-500/[0.06] px-2.5 py-2"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="text-[12px] font-medium text-mute-strong">还没有可用模型</span>
+              <span class="chip shrink-0 bg-brand-500/10 text-brand-300 ring-brand-400/30">一次装好</span>
+            </div>
+            <p class="mt-0.5 text-[10.5px] text-mute-soft">
+              一键安装 {{ recommendedModel.name }}（约
+              {{ formatBytes(recommendedModel.sizeMb * 1024 * 1024) }}），装完自动自检。
+            </p>
+            <button
+              type="button"
+              class="btn-primary mt-2 w-full"
+              :disabled="isPulling(recommendedModel.id)"
+              @click="installModel(recommendedModel)"
+            >
+              {{ isPulling(recommendedModel.id) ? `下载中 ${pullPercent(recommendedModel.id)}%` : '安装推荐模型' }}
+            </button>
+          </div>
+
+          <div
             v-for="model in models"
             :key="model.id"
-            type="button"
-            class="w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors"
+            class="w-full rounded-lg border px-2.5 py-1.5 transition-colors"
             :class="
               selectedModelId === model.id
                 ? 'border-brand-500/60 bg-brand-500/[0.08]'
                 : 'border-line bg-ink-900/50 hover:border-line-strong'
             "
-            :aria-pressed="selectedModelId === model.id"
-            @click="selectModel(model.id)"
           >
-            <div class="flex items-center gap-1.5">
-              <span class="truncate text-[12px] font-medium text-mute-strong">{{ model.name }}</span>
-              <span class="chip shrink-0" :class="modelKindClass(model.kind)">
-                {{ MODEL_KIND_LABEL[model.kind] ?? model.kind }}
-              </span>
-              <span class="chip shrink-0 bg-overlay/5 font-mono text-mute-soft ring-overlay/10">x{{ model.scale }}</span>
-              <span
-                class="ml-auto chip shrink-0"
-                :class="
-                  model.installed
-                    ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-400/25'
-                    : 'bg-amber-500/10 text-amber-300 ring-amber-400/25'
-                "
-              >
-                {{ model.installed ? '已安装' : '未安装' }}
+            <button type="button" class="w-full text-left" @click="selectModel(model.id)">
+              <div class="flex items-center gap-1.5">
+                <span class="truncate text-[12px] font-medium text-mute-strong">{{ model.name }}</span>
+                <span class="chip shrink-0" :class="modelKindClass(model.kind)">
+                  {{ MODEL_KIND_LABEL[model.kind] ?? model.kind }}
+                </span>
+                <span class="chip shrink-0 bg-overlay/5 font-mono text-mute-soft ring-overlay/10">x{{ model.scale }}</span>
+                <span
+                  class="ml-auto chip shrink-0"
+                  :class="
+                    model.installed
+                      ? model.verified
+                        ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-400/25'
+                        : 'bg-sky-500/10 text-sky-300 ring-sky-400/25'
+                      : 'bg-amber-500/10 text-amber-300 ring-amber-400/25'
+                  "
+                >
+                  {{ model.installed ? (model.verified ? '自检通过' : '已安装') : '未安装' }}
+                </span>
+              </div>
+              <div class="mt-0.5 flex items-center gap-2 text-[10.5px] text-mute-soft">
+                <span class="truncate">{{ model.description || MODEL_KIND_HINT[model.kind] }}</span>
+                <span class="shrink-0 font-mono">{{ model.sizeMb > 0 ? formatBytes(model.sizeMb * 1024 * 1024) : '内置' }}</span>
+              </div>
+            </button>
+
+            <div class="mt-1 flex items-center gap-1.5 text-[10px] text-mute-soft">
+              <span v-if="model.license">{{ model.license }}</span>
+              <span v-if="model.arch">· {{ model.arch }}</span>
+              <span v-if="model.origin === 'imported'" class="chip bg-overlay/5 text-mute-soft ring-overlay/10">导入</span>
+              <span class="ml-auto flex items-center gap-1">
+                <button
+                  v-if="!model.installed && !isPulling(model.id)"
+                  type="button"
+                  class="btn-ghost !px-2 !py-[1px] text-[11px]"
+                  @click="installModel(model)"
+                >
+                  下载
+                </button>
+                <button
+                  v-else-if="isPulling(model.id)"
+                  type="button"
+                  class="btn-ghost !px-2 !py-[1px] text-[11px]"
+                  @click="cancelModel(model.id)"
+                >
+                  取消 {{ pullPercent(model.id) }}%
+                </button>
+                <template v-else>
+                  <button
+                    type="button"
+                    class="btn-ghost !px-2 !py-[1px] text-[11px]"
+                    @click="selfTestModel(model.id)"
+                  >
+                    自检
+                  </button>
+                  <button
+                    v-if="testOf(model.id) && !testOf(model.id)!.ok"
+                    type="button"
+                    class="btn-ghost !px-2 !py-[1px] text-[11px]"
+                    @click="copyModelDiagnostics(model.id)"
+                  >
+                    诊断
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-danger !px-2 !py-[1px] text-[11px]"
+                    @click="removeModel(model.id)"
+                  >
+                    删除
+                  </button>
+                </template>
               </span>
             </div>
-            <div class="mt-0.5 flex items-center gap-2 text-[10.5px] text-mute-soft">
-              <span class="truncate">{{ model.description || MODEL_KIND_HINT[model.kind] }}</span>
-              <span class="shrink-0 font-mono">{{ model.sizeMb > 0 ? formatBytes(model.sizeMb * 1024 * 1024) : '内置' }}</span>
+
+            <div v-if="isPulling(model.id)" class="mt-1 h-1 w-full overflow-hidden rounded-full bg-ink-700">
+              <div
+                class="h-full bg-brand-400 transition-[width] duration-200"
+                :style="{ width: `${pullPercent(model.id)}%` }"
+              />
             </div>
-          </button>
+            <div
+              v-if="testOf(model.id)"
+              class="mt-1 text-[10px]"
+              :class="testOf(model.id)!.ok ? 'text-emerald-300' : 'text-amber-300'"
+            >
+              {{
+                testOf(model.id)!.ok
+                  ? '自检通过'
+                  : '自检失败：' +
+                    testOf(model.id)!.checks
+                      .filter((check) => !check.ok)
+                      .map((check) => check.name)
+                      .join(', ')
+              }}
+            </div>
+          </div>
+
+          <p v-if="mmError" class="px-1 text-[10.5px] text-rose-300">{{ mmError }}</p>
 
           <p v-if="models.length === 0 && !modelsLoading" class="px-1 py-2 text-[11px] text-mute-soft">
             未发现模型：请检查数据目录 models/registry.json，或直接使用内置 Lanczos。

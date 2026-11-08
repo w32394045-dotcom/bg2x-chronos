@@ -52,6 +52,13 @@ ARCH="${ARCH:-amd64}"
 OUT_DIR="${OUT_DIR:-dist-packages}"
 LIB="${LIB:-native/build/libchronos.so}"
 BIN="${BIN:-}"
+# Optional ONNX Runtime runtime (the C++ core loads it dynamically). When set it
+# is shipped next to libchronos.so; the binaries carry an rpath of $ORIGIN/libs
+# and $ORIGIN/../lib, so `dlopen("libonnxruntime.so")` finds it there.
+ORT_LIB="${ORT_LIB:-}"
+if [ -n "${ORT_LIB}" ] && [ ! -f "${ORT_LIB}" ]; then
+  fail "ORT_LIB does not exist: ${ORT_LIB}"
+fi
 
 # The registry is embedded into the Go binary from internal/models/registry.json;
 # a copy is shipped in the payload so users can inspect the catalogue offline.
@@ -67,6 +74,13 @@ fi
 
 log() { printf '[package] %s\n' "$*"; }
 fail() { printf '[package] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# Ship the optional ONNX Runtime next to libchronos.so (see ORT_LIB above).
+install_ort() {
+  if [ -n "${ORT_LIB}" ]; then
+    install -m 0644 "${ORT_LIB}" "$1/libonnxruntime.so"
+  fi
+}
 
 command -v dpkg-deb >/dev/null 2>&1 || fail "dpkg-deb is required (apt-get install dpkg)"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
@@ -127,6 +141,7 @@ TAR_ROOT="${STAGE}/${TARBALL%.tar.gz}"
 mkdir -p "${TAR_ROOT}/libs" "${TAR_ROOT}/models"
 install -m 0755 "${BIN}" "${TAR_ROOT}/chronos"
 install -m 0644 "${LIB}" "${TAR_ROOT}/libs/libchronos.so"
+install_ort "${TAR_ROOT}/libs"
 install -m 0644 "${REGISTRY}" "${TAR_ROOT}/models/registry.json"
 for extra in README.md LICENSE; do
   if [ -f "${extra}" ]; then
@@ -146,6 +161,7 @@ WEB_ROOT="${STAGE}/${WEB_TARBALL%.tar.gz}"
 mkdir -p "${WEB_ROOT}/libs" "${WEB_ROOT}/models" "${WEB_ROOT}/web"
 install -m 0755 "${WEB_BIN}" "${WEB_ROOT}/chronos"
 install -m 0644 "${LIB}" "${WEB_ROOT}/libs/libchronos.so"
+install_ort "${WEB_ROOT}/libs"
 install -m 0644 "${REGISTRY}" "${WEB_ROOT}/models/registry.json"
 cp -R "${DIST_DIR}/." "${WEB_ROOT}/web/"
 for extra in README.md LICENSE; do
@@ -179,6 +195,7 @@ mkdir -p "${DEB_ROOT}/DEBIAN" \
 
 install -m 0755 "${BIN}" "${DEB_ROOT}/opt/chronos/chronos"
 install -m 0644 "${LIB}" "${DEB_ROOT}/opt/chronos/libs/libchronos.so"
+install_ort "${DEB_ROOT}/opt/chronos/libs"
 install -m 0644 "${REGISTRY}" "${DEB_ROOT}/opt/chronos/models/registry.json"
 for extra in README.md LICENSE; do
   if [ -f "${extra}" ]; then

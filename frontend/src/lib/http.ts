@@ -184,6 +184,15 @@ export function createHttpApi(options: HttpTransportOptions = {}): Api {
     Reveal: (path) => rpc('Reveal', [path]),
     OpenDataDir: () => rpc('OpenDataDir', []),
     ListDirectory: (path) => rpc('ListDirectory', [path]),
+    PickModelFile: () => rpc('PickModelFile', []),
+    PullModel: (req) => rpc('PullModel', [req]),
+    CancelPull: (modelId) => rpc('CancelPull', [modelId]),
+    RemoveModel: (modelId) => rpc('RemoveModel', [modelId]),
+    ImportModel: (req) => rpc('ImportModel', [req]),
+    SelfTestModel: (modelId) => rpc('SelfTestModel', [modelId]),
+    GetModelDiagnostics: (modelId) => rpc('GetModelDiagnostics', [modelId]),
+    GetAccelStatus: () => rpc('GetAccelStatus', []),
+    SetAccelMode: (mode) => rpc('SetAccelMode', [mode]),
   }
 }
 

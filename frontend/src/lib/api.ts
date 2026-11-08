@@ -22,16 +22,22 @@ import {
   type Transport,
 } from './http'
 import type {
+  AccelStatus,
   AppInfo,
   BatchRequest,
   BatchResult,
   DirListing,
+  ImportModelRequest,
   InhibitRequest,
   InhibitStatus,
   JobSummary,
   LogEvent,
+  ModelDiagnostics,
   ModelInfo,
+  ModelPullState,
+  ModelSelfTest,
   ProgressEvent,
+  PullModelRequest,
 } from './types'
 
 export { isDesktop }
@@ -54,6 +60,20 @@ export interface Api {
   OpenDataDir(): Promise<void>
   /** 浏览器模式的服务端目录枚举（空字符串 = Go 侧 home 目录）。 */
   ListDirectory(path: string): Promise<DirListing>
+  /** 桌面原生文件选择；浏览器模式返回空串（改用 ListDirectory）。 */
+  PickModelFile(): Promise<string>
+  /** 启动模型下载（异步），进度走 chronos:model 事件。 */
+  PullModel(req: PullModelRequest): Promise<ModelPullState>
+  CancelPull(modelId: string): Promise<boolean>
+  RemoveModel(modelId: string): Promise<void>
+  /** 导入外部 .onnx（或包含 .onnx/.data 的目录）。 */
+  ImportModel(req: ImportModelRequest): Promise<ModelInfo>
+  /** 装完自检：加载/尺寸/色彩/拼接不变性/耗时。 */
+  SelfTestModel(modelId: string): Promise<ModelSelfTest>
+  GetModelDiagnostics(modelId: string): Promise<ModelDiagnostics>
+  GetAccelStatus(): Promise<AccelStatus>
+  /** "auto" | "cpu" */
+  SetAccelMode(mode: string): Promise<AccelStatus>
 }
 
 /**
@@ -86,6 +106,15 @@ export function createWailsApi(): Api {
     Reveal: bind('Reveal'),
     OpenDataDir: bind('OpenDataDir'),
     ListDirectory: bind('ListDirectory'),
+    PickModelFile: bind('PickModelFile'),
+    PullModel: bind('PullModel'),
+    CancelPull: bind('CancelPull'),
+    RemoveModel: bind('RemoveModel'),
+    ImportModel: bind('ImportModel'),
+    SelfTestModel: bind('SelfTestModel'),
+    GetModelDiagnostics: bind('GetModelDiagnostics'),
+    GetAccelStatus: bind('GetAccelStatus'),
+    SetAccelMode: bind('SetAccelMode'),
   }
 }
 
