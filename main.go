@@ -23,7 +23,9 @@ func main() {
 	// Browser mode: explicit switch, missing WebView2, or a headless Linux
 	// session. The UI is then served on 127.0.0.1 and opened in the default
 	// browser, using the exact same app core as the desktop shell.
-	if forceBrowser() || !desktopAvailable() {
+	// Wails' bindings generator builds+runs this package with the `bindings`
+	// tag; that temporary binary must go straight to wails.Run.
+	if !wailsBindings && (forceBrowser() || !desktopAvailable()) {
 		if err := runBrowserMode(app); err != nil {
 			fmt.Fprintln(os.Stderr, "chronos:", err)
 			os.Exit(1)
@@ -48,6 +50,11 @@ func main() {
 		},
 	})
 	if err != nil {
+		if wailsBindings {
+			// Bindings generation must fail loudly instead of starting a server.
+			fmt.Fprintln(os.Stderr, "chronos:", err)
+			os.Exit(1)
+		}
 		fmt.Fprintf(os.Stderr, "chronos: 桌面窗口启动失败 (%v)，改用浏览器模式\n", err)
 		if fbErr := runBrowserMode(app); fbErr != nil {
 			fmt.Fprintln(os.Stderr, "chronos:", fbErr)
