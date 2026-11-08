@@ -36,7 +36,7 @@ jobs:
     # A failed OpenVINO install / configure / run is informative, not a gate.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build tools
         run: |
