@@ -52,7 +52,7 @@ func newTestManager(t *testing.T) *Manager {
 	t.Cleanup(server.Close)
 
 	m := NewManager(t.TempDir())
-	m.SetComponent(Component{
+	m.SetCandidates([]Component{{
 		Flavor:   FlavorDirectML,
 		Version:  "1.24.4",
 		Required: []string{"onnxruntime.dll"},
@@ -72,10 +72,9 @@ func newTestManager(t *testing.T) *Manager {
 				return ""
 			},
 		}},
-	})
+	}})
 	return m
 }
-
 func TestManagerInstallAndRemove(t *testing.T) {
 	m := newTestManager(t)
 	if m.Installed(FlavorDirectML) {
@@ -121,11 +120,9 @@ func TestManagerInstallAndRemove(t *testing.T) {
 
 func TestManagerRejectsChecksumMismatch(t *testing.T) {
 	m := newTestManager(t)
-	m.mu.Lock()
-	component := m.component
-	m.mu.Unlock()
+	component := m.Candidate(FlavorDirectML)
 	component.Parts[0].SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
-	m.SetComponent(component)
+	m.SetCandidates([]Component{component})
 
 	if err := m.Install(context.Background()); err == nil {
 		t.Fatal("install with a wrong checksum must fail")
@@ -170,8 +167,9 @@ func TestManagerActivate(t *testing.T) {
 func TestState(t *testing.T) {
 	m := newTestManager(t)
 	state := m.State(FlavorDirectML)
-	if state.Flavor != FlavorDirectML || state.Installed || !state.Installable {
-		t.Fatalf("state = %+v", state)
+	wantInstallable := runtime.GOOS == "windows"
+	if state.Flavor != FlavorDirectML || state.Installed || state.Installable != wantInstallable {
+		t.Fatalf("state = %+v (installable want %v)", state, wantInstallable)
 	}
 	if state.Version != "1.24.4" || state.SizeMB <= 0 {
 		t.Fatalf("state component info = %+v", state)

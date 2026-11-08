@@ -41,9 +41,16 @@ const canInstallGpu = computed(
 const gpuRuntimeLabel = computed(() => {
   const component = gpuRuntime.value
   if (!component) return '未知'
-  if (component.installed) return `已安装 ${component.version}`
-  if (component.installable) return `未安装（约 ${component.sizeMb} MB）`
+  const experimental = component.experimental ? ' · exp' : ''
+  if (component.installed) return `已安装 ${component.version}${experimental}`
+  if (component.installable) return `未安装（约 ${component.sizeMb} MB${experimental}）`
   return '此平台不需要'
+})
+const gpuFlavorLabel = computed(() => {
+  const flavor = gpuRuntime.value?.flavor
+  if (flavor === 'cuda') return 'CUDA'
+  if (flavor === 'openvino') return 'OpenVINO'
+  return 'DirectML'
 })
 const restartRequired = computed(() => accelStatus.value?.restartRequired === true)
 
@@ -215,11 +222,18 @@ async function setMode(mode: string): Promise<void> {
               class="btn-ghost mt-1.5 w-full"
               @click="installGpu"
             >
-              下载 GPU 运行时（{{ gpuRuntime?.flavor === 'cuda' ? 'CUDA' : 'DirectML' }} {{ gpuRuntime?.sizeMb }} MB）
+              下载 GPU 运行时（{{ gpuFlavorLabel }} {{ gpuRuntime?.sizeMb }} MB）
             </button>
             <p v-if="gpuInstallFailed" class="mt-1 text-[10px] text-rose-300">
               安装失败：{{ accelStatus?.installError }}
             </p>
+            <div
+              v-if="accelStatus?.runtimeDisabled"
+              class="mt-1 rounded-md bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300"
+            >
+              已自动关闭：{{ accelStatus?.verifyError || '运行时自检未通过' }}
+              <button type="button" class="ml-1 underline" @click="installGpu">重新尝试</button>
+            </div>
             <p v-if="restartRequired" class="mt-1 text-[10px] text-amber-300">
               安装完成，重启应用后启用 GPU。
             </p>

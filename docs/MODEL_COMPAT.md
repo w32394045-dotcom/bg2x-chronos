@@ -70,6 +70,23 @@ chronos models selftest <id>
 | `.pb` / `.tflite` / `.param` | 非 ONNX |
 | 缺少 `.data` 分片 | 导入时会把同目录 `.onnx.data` 一起拷贝；其它分片形式不支持 |
 
+## Linux GPU 运行时矩阵（P3）
+
+DirectML 是 Windows 专有，**Linux 上永远不会提供 DML**。Linux 的可选运行时：
+
+| 硬件 | 运行时 | 体积 | 状态 |
+| --- | --- | --- | --- |
+| Intel CPU / iGPU / NPU | `openvino`（onnxruntime-openvino wheel，自包含） | 80.5MB | 🧪 实验性（exp） |
+| NVIDIA 独显 | `cuda`（ORT 官方 gpu 包，需系统 CUDA 12 库） | 195.9MB | 🧪 实验性（exp） |
+| **AMD（ROCm/MIGraphX）** | 不提供 | — | ⛔ 原因：ORT 官方已把 ROCm EP 移出主干，MIGraphX 需要用户自装 ROCm 且无官方预编译包 |
+| **任意 Vulkan GPU** | 不提供 | — | ⛔ 原因：ORT 官方二进制不带 Vulkan EP，需要自行编译，ROI 过低 |
+| SYCL / oneAPI | 不提供 | — | ⛔ 原因：官方包不带，需自行编译 |
+| WebGPU（原生） | 不提供 | — | ⛔ 原因：原生侧仍是实验阶段 |
+
+所有下载的运行时都必须先通过**子进程自检**（`chronos probe --json`）才会被激活；
+自检失败会自动关闭该运行时并回落到内置 CPU 运行时，状态标会显示原因。
+
+
 ## 维护规则
 
 1. 每次 CI `compat` 作业或真机验证后更新本表，写清**模型名 + 架构 + 结论 + 依据**。

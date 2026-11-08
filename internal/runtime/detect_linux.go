@@ -5,13 +5,13 @@ package runtime
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
-// nvidiaPresent reports whether the machine looks like it has an NVIDIA GPU with
-// a driver installed. It is a best-effort gate for offering the CUDA runtime
-// download: a false positive only means the user may download something that
-// falls back to CPU, never a crash.
+// nvidiaPresent reports whether the machine looks like it has an NVIDIA GPU and
+// driver. It only gates whether we OFFER the CUDA download: a false positive
+// costs a download, and Verify() plus CPU fallback keep it safe.
 func nvidiaPresent() bool {
 	for _, path := range []string{"/dev/nvidia0", "/proc/driver/nvidia/version"} {
 		if _, err := os.Stat(path); err == nil {
@@ -21,7 +21,6 @@ func nvidiaPresent() bool {
 	if _, err := exec.LookPath("nvidia-smi"); err == nil {
 		return true
 	}
-	// libcuda.so.1 may be installed without the device nodes (container).
 	for _, path := range []string{"/usr/lib/x86_64-linux-gnu/libcuda.so.1", "/usr/lib64/libcuda.so.1"} {
 		if _, err := os.Stat(path); err == nil {
 			return true
@@ -30,9 +29,21 @@ func nvidiaPresent() bool {
 	return false
 }
 
-// cudaLibsHint explains what the CUDA runtime still needs from the system.
-func cudaLibsHint() string {
-	return "需要 NVIDIA 驱动与 CUDA 12 运行时库（libcudart/libcublas 等）"
+// intelPresent reports whether the machine has an Intel GPU (or an Intel CPU,
+// which the OpenVINO CPU plugin accelerates). It gates the OpenVINO download,
+// which is the Linux iGPU path.
+func intelPresent() bool {
+	matches, _ := filepath.Glob("/sys/class/drm/card*/device/vendor")
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.Contains(strings.ToLower(string(data)), "0x8086") {
+			return true
+		}
+	}
+	if data, err := os.ReadFile("/proc/cpuinfo"); err == nil {
+		if strings.Contains(string(data), "GenuineIntel") {
+			return true
+		}
+	}
+	return false
 }
-
-var _ = strings.TrimSpace

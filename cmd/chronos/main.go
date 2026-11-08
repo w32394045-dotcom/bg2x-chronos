@@ -47,6 +47,8 @@ func main() {
 	switch os.Args[1] {
 	case "upscale":
 		err = runUpscale(ctx, os.Args[2:])
+	case "probe":
+		err = cmdProbe(os.Args[2:])
 	case "info":
 		err = runInfo(os.Args[2:])
 	case "gen":
@@ -698,4 +700,35 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// cmdProbe prints the native runtime capability report as JSON. It is used by
+// the GUI as a CHILD-PROCESS gate before activating a downloaded runtime: a
+// crashing or incompatible runtime then only kills the probe, never the app.
+func cmdProbe(args []string) error {
+	jsonOut := false
+	for _, arg := range args {
+		switch arg {
+		case "--json", "-json":
+			jsonOut = true
+		}
+	}
+	probe := engine.GetProbe()
+	report := map[string]any{
+		"ort":       probe.ORT.Available,
+		"version":   probe.ORT.Version,
+		"providers": probe.ORT.Providers,
+		"openvino":  probe.OpenVINO.Available,
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	if !probe.ORT.Available {
+		// Exit 3 = runtime loaded but unusable; the caller treats it as "verify failed".
+		os.Exit(3)
+	}
+	_ = jsonOut
+	return nil
 }

@@ -1,17 +1,19 @@
 // Package runtime manages the optional ONNX Runtime binaries that the native
 // core loads dynamically (see docs/PLAN-v0.3.md ADR-003).
 //
-// The C++ layer never links against ONNX Runtime; it resolves the library at run
-// time through CHRONOS_ORT_DIR / <exe dir>/ort. This package owns download,
-// verification and activation of those binaries so that:
-//   - the shipped packages can carry the CPU runtime, and
-//   - GPU support (DirectML on Windows) is an explicit, verified download.
+// The C++ layer never links ONNX Runtime; it resolves the library at run time
+// through CHRONOS_ORT_DIR / <exe dir>/ort. This package owns download,
+// verification and activation of those binaries.
 //
-// Windows GPU needs TWO upstream archives: the DirectML build of ONNX Runtime
-// and the DirectML redistributable itself. The native loader takes the first
-// CHRONOS_ORT_DIR entry, so a missing DirectML.dll would make the DML execution
-// provider fail hard at session creation. Installed() therefore requires both
-// files; the manager never activates a half-installed runtime.
+// Platform matrix (DirectML is never offered on Linux):
+//   - Windows:      DirectML (Intel/AMD/NVIDIA)  onnxruntime-directml + DirectML.dll
+//   - Linux/NVIDIA: CUDA                         official ORT gpu tgz (+ system CUDA libs)
+//   - Linux/Intel:  OpenVINO                     onnxruntime-openvino wheel (self-contained)
+//
+// Every candidate runtime is verified in a CHILD PROCESS (`chronos probe --json`)
+// before the parent process points CHRONOS_ORT_DIR at it: the native loader
+// caches a loaded library for the process lifetime, so activating an
+// incompatible runtime would be unrecoverable.
 package runtime
 
 import (
@@ -19,29 +21,33 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/artifact"
 )
 
-// ORTVersion is the pinned ONNX Runtime version. DirectML builds stop at 1.24.4
-// upstream (see ADR-003).
-const ORTVersion = "1.24.4"
-
-// DirectMLVersion is the pinned DirectML redistributable version.
-const DirectMLVersion = "1.15.4"
+// Pinned runtime versions.
+const (
+	ORTVersion        = "1.24.4" // CPU runtime + DirectML/CUDA components
+	DirectMLVersion   = "1.15.4" // DirectML redistributable
+	OpenVINORTVersion = "1.24.1" // version inside the onnxruntime-openvino wheel
+)
 
 // Flavors.
 const (
-	FlavorCPU      = "cpu"      // bundled with the packages (no download)
-	FlavorDirectML = "directml" // optional GPU runtime (Windows only)
-	FlavorCUDA     = "cuda"     // optional GPU runtime (Linux/NVIDIA only)
+	FlavorCPU      = "cpu"
+	FlavorDirectML = "directml"
+	FlavorCUDA     = "cuda"
+	FlavorOpenVINO = "openvino"
 )
 
 // EnvVar is the environment variable the native loader reads first.
@@ -58,11 +64,16 @@ type Part struct {
 
 // Component is a flavor made of one or more archives.
 type Component struct {
-	Flavor  string
-	Version string
-	Parts   []Part
-	// Required lists the files that must exist after extraction.
+	Flavor   string
+	Version  string
+	Parts    []Part
 	Required []string
+	// Experimental marks runtimes not yet verified on real hardware by this
+	// project's CI: the UI shows an "exp" badge and failures auto-disable.
+	Experimental bool
+	// Materialize runs after extraction (e.g. create libonnxruntime.so from a
+	// versioned file, which the loader requires).
+	Materialize func(dir string) error
 }
 
 // SizeMB is the total download size of the component.
@@ -80,7 +91,7 @@ func basenameDL(prefix string) func(string) string {
 			return ""
 		}
 		name := strings.TrimPrefix(entry, prefix)
-		if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) {
+		if name == "" || strings.ContainsAny(name, `/\`) {
 			return ""
 		}
 		if !strings.HasSuffix(strings.ToLower(name), ".dll") {
@@ -90,57 +101,8 @@ func basenameDL(prefix string) func(string) string {
 	}
 }
 
-// CUDAComponent is the pinned Linux/NVIDIA runtime (official ORT release).
-// The archive still needs the system CUDA 12 libraries; it only carries the
-// ONNX Runtime CUDA execution provider itself.
-func CUDAComponent() Component {
-	return Component{
-		Flavor:   FlavorCUDA,
-		Version:  ORTVersion,
-		Required: []string{"libonnxruntime.so"},
-		Parts: []Part{
-			{
-				Name:   "onnxruntime-cuda",
-				URL: "https://github.com/microsoft/onnxruntime/releases/download/v" + ORTVersion +
-					"/onnxruntime-linux-x64-gpu-" + ORTVersion + ".tgz",
-				SHA256: "", // filled in below once verified (see ORTCUDAArchiveSHA256)
-				SizeMB: 195.9,
-				Extract: func(entry string) string {
-					const marker = "/lib/"
-					index := strings.Index(entry, marker)
-					if index < 0 {
-						return ""
-					}
-					name := entry[index+len(marker):]
-					if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) {
-						return ""
-					}
-					return name
-				},
-			},
-		},
-	}
-}
-
-// ORTCUDAArchiveSHA256 is the SHA256 of the pinned CUDA runtime archive.
-const ORTCUDAArchiveSHA256 = "c5f804ff5d239b436fa59e9f2fb288a39f7eb9552f6a636c8b71e792e91a8808"
-
-// defaultComponent returns the GPU runtime component for this platform. It is
-// empty on platforms without a supported GPU path, and Install() refuses to run
-// for a component that does not match the platform: DirectML is never offered on
-// Linux and CUDA is never offered on Windows.
-func defaultComponent() Component {
-	if runtime.GOOS == "linux" {
-		component := CUDAComponent()
-		component.Parts[0].SHA256 = ORTCUDAArchiveSHA256
-		return component
-	}
-	if runtime.GOOS == "windows" {
-		return DirectMLComponent()
-	}
-	return Component{}
-}
-// SHA256 values were verified against nuget.org on 2026-11-08.
+// DirectMLComponent is the pinned Windows GPU runtime (hashes verified against
+// nuget.org on 2026-11-08).
 func DirectMLComponent() Component {
 	return Component{
 		Flavor:   FlavorDirectML,
@@ -148,7 +110,7 @@ func DirectMLComponent() Component {
 		Required: []string{"onnxruntime.dll", "DirectML.dll"},
 		Parts: []Part{
 			{
-				Name:   "onnxruntime-directml",
+				Name: "onnxruntime-directml",
 				URL: "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/" +
 					ORTVersion + "/microsoft.ml.onnxruntime.directml." + ORTVersion + ".nupkg",
 				SHA256:  "57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681",
@@ -156,7 +118,7 @@ func DirectMLComponent() Component {
 				Extract: basenameDL("runtimes/win-x64/native/"),
 			},
 			{
-				Name:   "directml",
+				Name: "directml",
 				URL: "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/" +
 					DirectMLVersion + "/microsoft.ai.directml." + DirectMLVersion + ".nupkg",
 				SHA256:  "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9",
@@ -167,45 +129,180 @@ func DirectMLComponent() Component {
 	}
 }
 
+// CUDAComponent is the pinned Linux/NVIDIA runtime. The system still needs the
+// CUDA 12 user-space libraries; this archive only carries ORT's CUDA EP.
+func CUDAComponent() Component {
+	return Component{
+		Flavor:       FlavorCUDA,
+		Version:      ORTVersion,
+		Experimental: true,
+		Required:     []string{"libonnxruntime.so"},
+		Parts: []Part{
+			{
+				Name: "onnxruntime-cuda",
+				URL: "https://github.com/microsoft/onnxruntime/releases/download/v" + ORTVersion +
+					"/onnxruntime-linux-x64-gpu-" + ORTVersion + ".tgz",
+				SHA256: "c5f804ff5d239b436fa59e9f2fb288a39f7eb9552f6a636c8b71e792e91a8808",
+				SizeMB: 195.9,
+				Extract: func(entry string) string {
+					const marker = "/lib/"
+					index := strings.Index(entry, marker)
+					if index < 0 {
+						return ""
+					}
+					name := entry[index+len(marker):]
+					if name == "" || strings.ContainsAny(name, `/\`) {
+						return ""
+					}
+					return name
+				},
+			},
+		},
+		Materialize: func(dir string) error { return materializeVersionedLib(dir, "libonnxruntime.so") },
+	}
+}
+
+// OpenVINOComponent is the pinned Linux/Intel runtime: a self-contained wheel
+// with ONNX Runtime + the OpenVINO EP + Intel CPU/GPU/NPU plugins (no system
+// OpenVINO installation required).
+func OpenVINOComponent() Component {
+	return Component{
+		Flavor:       FlavorOpenVINO,
+		Version:      OpenVINORTVersion,
+		Experimental: true,
+		Required:     []string{"libonnxruntime.so", "libonnxruntime_providers_openvino.so"},
+		Parts: []Part{
+			{
+				Name: "onnxruntime-openvino",
+				URL: "https://files.pythonhosted.org/packages/50/cf/17ba72de2df0fcba349937d2788f154397bbc2d1a2d67772a97e26f6bc5f/" +
+					"onnxruntime_openvino-1.24.1-cp312-cp312-manylinux_2_28_x86_64.whl",
+				SHA256: "d617fac2f59a6ab5ea59a788c3e1592240a129642519aaeaa774761dfe35150e",
+				SizeMB: 80.5,
+				Extract: func(entry string) string {
+					const prefix = "onnxruntime/capi/"
+					if !strings.HasPrefix(entry, prefix) {
+						return ""
+					}
+					name := strings.TrimPrefix(entry, prefix)
+					if name == "" || strings.ContainsAny(name, `/\`) {
+						return ""
+					}
+					if !strings.HasPrefix(name, "lib") || !strings.Contains(name, ".so") {
+						return ""
+					}
+					return name
+				},
+			},
+		},
+		Materialize: func(dir string) error { return materializeVersionedLib(dir, "libonnxruntime.so") },
+	}
+}
+
+// materializeVersionedLib copies lib<name>.so.<ver> to the plain name the native
+// loader opens.
+func materializeVersionedLib(dir, plain string) error {
+	target := filepath.Join(dir, plain)
+	if st, err := os.Stat(target); err == nil && st.Size() > 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), plain+".") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	}
+	return fmt.Errorf("no versioned %s.* found in %s", plain, dir)
+}
+
 // State is the UI facing view of one flavor.
 type State struct {
-	Flavor      string  `json:"flavor"`
-	Installed   bool    `json:"installed"`
-	Dir         string  `json:"dir"`
-	Installable bool    `json:"installable"`
-	Version     string  `json:"version"`
-	SizeMB      float64 `json:"sizeMb"`
+	Flavor       string  `json:"flavor"`
+	Installed    bool    `json:"installed"`
+	Dir          string  `json:"dir"`
+	Installable  bool    `json:"installable"`
+	Version      string  `json:"version"`
+	SizeMB       float64 `json:"sizeMb"`
+	Experimental bool    `json:"experimental"`
 }
 
 // Manager owns <dataDir>/runtime/ort/<flavor>-<version>/.
 type Manager struct {
 	root       string
 	downloader *artifact.Downloader
-	component  Component
 
-	mu      sync.Mutex
-	logf    func(format string, args ...any)
-	phase   string
-	part    string
-	done    int64
-	total   int64
-	lastErr string
+	mu         sync.Mutex
+	candidates []Component
+	component  Component
+	logf       func(format string, args ...any)
+	phase      string
+	part       string
+	done       int64
+	total      int64
+	lastErr    string
+	forced     bool
 }
 
-// NewManager creates the manager below <dataDir>/runtime.
+// NewManager creates the manager below <dataDir>/runtime and selects the best
+// GPU runtime candidate for this machine.
 func NewManager(dataDir string) *Manager {
-	return &Manager{
+	m := &Manager{
 		root:       filepath.Join(dataDir, "runtime"),
 		downloader: &artifact.Downloader{},
-		component:  defaultComponent(),
 	}
+	m.candidates = candidatesForPlatform()
+	if len(m.candidates) > 0 {
+		m.component = m.candidates[0]
+	}
+	return m
 }
 
-// SetComponent overrides the downloadable component (tests / future flavors).
-func (m *Manager) SetComponent(c Component) {
+// candidatesForPlatform lists the GPU runtimes worth offering, best first.
+// Detection is advisory: a false positive only costs a download, and Verify()
+// prevents an unusable runtime from being activated.
+func candidatesForPlatform() []Component {
+	switch runtime.GOOS {
+	case "windows":
+		return []Component{DirectMLComponent()}
+	case "linux":
+		var out []Component
+		if nvidiaPresent() {
+			out = append(out, CUDAComponent())
+		}
+		if intelPresent() {
+			out = append(out, OpenVINOComponent())
+		}
+		return out
+	}
+	return nil
+}
+
+// SetCandidates overrides the candidate list (tests / future flavors).
+func (m *Manager) SetCandidates(list []Component) {
 	m.mu.Lock()
-	m.component = c
+	m.candidates = list
+	m.forced = true
+	if len(list) > 0 {
+		m.component = list[0]
+	} else {
+		m.component = Component{}
+	}
 	m.mu.Unlock()
+}
+
+// supported reports whether the flavor is allowed here (tests may force it).
+func (m *Manager) supported(flavor string) bool {
+	m.mu.Lock()
+	forced := m.forced
+	m.mu.Unlock()
+	return forced || platformSupportsFlavor(flavor)
 }
 
 // SetLogger installs a log sink (optional).
@@ -218,11 +315,31 @@ func (m *Manager) SetLogger(logf func(format string, args ...any)) {
 // Root is the runtime directory (<dataDir>/runtime).
 func (m *Manager) Root() string { return m.root }
 
+// Candidate returns the component for a flavor (zero when unknown here).
+func (m *Manager) Candidate(flavor string) Component {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.component.Flavor == flavor {
+		return m.component
+	}
+	for _, candidate := range m.candidates {
+		if candidate.Flavor == flavor {
+			return candidate
+		}
+	}
+	return Component{}
+}
+
+// GpuFlavor is the GPU runtime flavor this machine would use ("" when none).
+func (m *Manager) GpuFlavor() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.component.Flavor
+}
+
 // Dir is the install directory of one flavor.
 func (m *Manager) Dir(flavor string) string {
-	m.mu.Lock()
-	version := m.component.Version
-	m.mu.Unlock()
+	version := m.Candidate(flavor).Version
 	if version == "" {
 		version = ORTVersion
 	}
@@ -231,13 +348,8 @@ func (m *Manager) Dir(flavor string) string {
 
 // Installed reports whether every required file of the flavor exists.
 func (m *Manager) Installed(flavor string) bool {
-	if flavor == FlavorCPU {
-		return false
-	}
-	m.mu.Lock()
-	component := m.component
-	m.mu.Unlock()
-	if component.Flavor != flavor || len(component.Required) == 0 {
+	component := m.Candidate(flavor)
+	if component.Flavor == "" || len(component.Required) == 0 {
 		return false
 	}
 	dir := m.Dir(flavor)
@@ -250,48 +362,46 @@ func (m *Manager) Installed(flavor string) bool {
 	return true
 }
 
-// GpuFlavor is the GPU runtime flavor this platform would use ("" when the
-// platform has no supported GPU path). Linux reports "cuda" only when an NVIDIA
-// device is present; DirectML is never offered on Linux.
-func (m *Manager) GpuFlavor() string {
-	m.mu.Lock()
-	flavor := m.component.Flavor
-	m.mu.Unlock()
-	if !platformSupportsFlavor(flavor) {
-		return ""
-	}
-	return flavor
-}
-
 // State reports one flavor for the UI.
 func (m *Manager) State(flavor string) State {
-	m.mu.Lock()
-	component := m.component
-	m.mu.Unlock()
-	installable := component.Flavor == flavor && platformSupportsFlavor(flavor)
+	component := m.Candidate(flavor)
 	return State{
-		Flavor:      flavor,
-		Installed:   m.Installed(flavor),
-		Dir:         m.Dir(flavor),
-		Installable: installable,
-		Version:     component.Version,
-		SizeMB:      component.SizeMB(),
+		Flavor:       flavor,
+		Installed:    m.Installed(flavor),
+		Dir:          m.Dir(flavor),
+		Installable:  component.Flavor != "" && m.supported(flavor),
+		Version:      component.Version,
+		SizeMB:       component.SizeMB(),
+		Experimental: component.Experimental,
 	}
 }
 
-// Progress is the current install progress. Done/Total refer to the part that
-// is being downloaded; Part names it ("onnxruntime-directml", "directml", ...).
+// Progress is the current install progress (per part).
 func (m *Manager) Progress() (phase, part string, done, total int64, lastErr string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.phase, m.part, m.done, m.total, m.lastErr
 }
 
-// Install downloads and extracts every part of the component. It is blocking;
-// callers usually run it in a goroutine and poll Progress/State.
+// Install downloads and extracts the selected GPU runtime.
 func (m *Manager) Install(ctx context.Context) error {
 	m.mu.Lock()
 	component := m.component
+	m.mu.Unlock()
+	return m.installComponent(ctx, component)
+}
+
+// InstallFlavor downloads and extracts a specific GPU runtime flavor.
+func (m *Manager) InstallFlavor(ctx context.Context, flavor string) error {
+	component := m.Candidate(flavor)
+	if component.Flavor == "" {
+		return fmt.Errorf("no %q runtime component for this platform", flavor)
+	}
+	return m.installComponent(ctx, component)
+}
+
+func (m *Manager) installComponent(ctx context.Context, component Component) error {
+	m.mu.Lock()
 	logf := m.logf
 	m.phase, m.part, m.done, m.total, m.lastErr = "resolving", "", 0, 0, ""
 	m.mu.Unlock()
@@ -301,8 +411,9 @@ func (m *Manager) Install(ctx context.Context) error {
 			logf(format, args...)
 		}
 	}
-	if component.Flavor == "" || !platformSupportsFlavor(component.Flavor) {
-		err := fmt.Errorf("no GPU runtime component for this platform (DirectML is Windows only, CUDA is Linux only)")
+	if !m.supported(component.Flavor) {
+		err := fmt.Errorf("the %q runtime is not supported on this platform/hardware "+
+			"(DirectML is Windows only; CUDA needs NVIDIA; OpenVINO needs Intel)", component.Flavor)
 		m.fail(err)
 		return err
 	}
@@ -325,9 +436,14 @@ func (m *Manager) Install(ctx context.Context) error {
 		m.fail(err)
 		return err
 	}
-
 	for index, part := range component.Parts {
-		archive := filepath.Join(cacheDir, fmt.Sprintf("%s-%s-%d.nupkg", component.Flavor, component.Version, index))
+		suffix := ".nupkg"
+		if strings.Contains(part.URL, ".tgz") {
+			suffix = ".tgz"
+		} else if strings.Contains(part.URL, ".whl") {
+			suffix = ".whl"
+		}
+		archive := filepath.Join(cacheDir, fmt.Sprintf("%s-%s-%d%s", component.Flavor, component.Version, index, suffix))
 		m.setPhase("downloading", part.Name)
 		log("下载运行时组件 %s（%0.1f MB）", part.Name, part.SizeMB)
 		file := artifact.File{URLs: []string{part.URL}, SHA256: part.SHA256}
@@ -350,7 +466,13 @@ func (m *Manager) Install(ctx context.Context) error {
 		}
 		_ = os.Remove(archive)
 	}
-
+	if component.Materialize != nil {
+		if err := component.Materialize(tmp); err != nil {
+			_ = os.RemoveAll(tmp)
+			m.fail(err)
+			return err
+		}
+	}
 	for _, name := range component.Required {
 		if st, err := os.Stat(filepath.Join(tmp, name)); err != nil || st.Size() == 0 {
 			_ = os.RemoveAll(tmp)
@@ -385,14 +507,53 @@ func (m *Manager) setPhase(phase, part string) {
 	m.mu.Unlock()
 }
 
-// Activate points the native loader at the installed runtime by setting
-// CHRONOS_ORT_DIR. It must run before the first engine is created: the native
-// loader caches a successfully loaded library for the process lifetime.
+// Verify runs the app's own `probe --json` in a CHILD process with
+// CHRONOS_ORT_DIR pointing at the candidate runtime. This proves the runtime can
+// be loaded before the parent process (which caches the library forever) uses it.
+func (m *Manager) Verify(ctx context.Context, exePath, flavor string) error {
+	if !m.Installed(flavor) {
+		return fmt.Errorf("runtime %q is not installed", flavor)
+	}
+	if exePath == "" {
+		return fmt.Errorf("cannot verify: unknown executable path")
+	}
+	dir := m.Dir(flavor)
+	verifyCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	command := exec.CommandContext(verifyCtx, exePath, "probe", "--json")
+	command.Env = append(os.Environ(), EnvVar+"="+dir)
+	output, err := command.Output()
+	if err != nil {
+		if verifyCtx.Err() != nil {
+			return fmt.Errorf("runtime probe timed out (the candidate runtime may be incompatible): %w", verifyCtx.Err())
+		}
+		return fmt.Errorf("runtime probe failed (incompatible or missing dependencies): %w", err)
+	}
+	var report struct {
+		ORT       bool     `json:"ort"`
+		Providers []string `json:"providers"`
+		Version   string   `json:"version"`
+	}
+	if err := json.Unmarshal(output, &report); err != nil {
+		return fmt.Errorf("runtime probe returned invalid JSON: %w", err)
+	}
+	if !report.ORT {
+		return fmt.Errorf("runtime probe could not load ONNX Runtime from %s", dir)
+	}
+	if len(report.Providers) == 0 {
+		return fmt.Errorf("runtime probe reported no execution providers")
+	}
+	if logf := m.logger(); logf != nil {
+		logf("运行时自检通过: %s %s (%s)", flavor, report.Version, strings.Join(report.Providers, ","))
+	}
+	return nil
+}
+
+// Activate points the native loader at the runtime by setting CHRONOS_ORT_DIR.
+// Callers must Verify() first; the loader caches the library for the process
+// lifetime.
 func (m *Manager) Activate(flavor string) (string, bool) {
-	m.mu.Lock()
-	componentFlavor := m.component.Flavor
-	m.mu.Unlock()
-	if flavor != componentFlavor || !platformSupportsFlavor(flavor) || !m.Installed(flavor) {
+	if !m.supported(flavor) || !m.Installed(flavor) {
 		return "", false
 	}
 	dir := m.Dir(flavor)
@@ -416,16 +577,15 @@ func (m *Manager) Remove(flavor string) error {
 	return artifact.Remove(m.Dir(flavor))
 }
 
-// platformSupportsFlavor reports whether the flavor makes sense on this OS.
-// DirectML is Windows-only; CUDA is Linux-only and additionally gated on an
-// NVIDIA-capable machine so we never push a 196 MB download at a machine that
-// cannot use it.
+// platformSupportsFlavor reports whether the flavor makes sense on this machine.
 func platformSupportsFlavor(flavor string) bool {
 	switch flavor {
 	case FlavorDirectML:
 		return runtime.GOOS == "windows"
 	case FlavorCUDA:
 		return runtime.GOOS == "linux" && nvidiaPresent()
+	case FlavorOpenVINO:
+		return runtime.GOOS == "linux" && intelPresent()
 	}
 	return false
 }
@@ -435,46 +595,10 @@ func extractArchive(archivePath, dir string, match func(string) string) error {
 	if strings.HasSuffix(strings.ToLower(archivePath), ".tgz") || strings.HasSuffix(strings.ToLower(archivePath), ".tar.gz") {
 		return extractTarArchive(archivePath, dir, match)
 	}
-	reader, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return fmt.Errorf("open runtime archive: %w", err)
-	}
-	defer reader.Close()
-	for _, entry := range reader.File {
-		name := match(entry.Name)
-		if name == "" {
-			continue
-		}
-		if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
-			return fmt.Errorf("refusing suspicious archive entry %q", entry.Name)
-		}
-		src, err := entry.Open()
-		if err != nil {
-			return err
-		}
-		dstPath := filepath.Join(dir, name)
-		dst, err := os.Create(dstPath)
-		if err != nil {
-			src.Close()
-			return err
-		}
-		if _, err := io.Copy(dst, src); err != nil {
-			dst.Close()
-			src.Close()
-			return err
-		}
-		if err := dst.Close(); err != nil {
-			src.Close()
-			return err
-		}
-		src.Close()
-	}
-	return nil
+	return extractZipArchive(archivePath, dir, match)
 }
 
-// extractTarArchive handles .tgz/.tar.gz archives. The official ONNX Runtime
-// Linux release stores libonnxruntime.so as a symlink to the versioned file, and
-// the native loader needs a real file, so symlinks are materialised as copies.
+// extractTarArchive handles .tgz/.tar.gz archives; symlinks become copies.
 func extractTarArchive(archivePath, dir string, match func(string) string) error {
 	file, err := os.Open(archivePath)
 	if err != nil {
@@ -528,14 +652,51 @@ func extractTarArchive(archivePath, dir string, match func(string) string) error
 		}
 	}
 	for _, entry := range links {
-		target := filepath.Join(dir, entry.target)
-		data, err := os.ReadFile(target)
+		data, err := os.ReadFile(filepath.Join(dir, entry.target))
 		if err != nil {
-			continue // dangling link: the required-file check reports it later
+			continue
 		}
 		if err := os.WriteFile(filepath.Join(dir, entry.name), data, 0o644); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// extractZipArchive handles zip/nupkg/whl archives.
+func extractZipArchive(archivePath, dir string, match func(string) string) error {
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("open runtime archive: %w", err)
+	}
+	defer reader.Close()
+	for _, entry := range reader.File {
+		name := match(entry.Name)
+		if name == "" {
+			continue
+		}
+		if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+			return fmt.Errorf("refusing suspicious archive entry %q", entry.Name)
+		}
+		src, err := entry.Open()
+		if err != nil {
+			return err
+		}
+		dst, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			src.Close()
+			return err
+		}
+		if _, err := io.Copy(dst, src); err != nil {
+			dst.Close()
+			src.Close()
+			return err
+		}
+		if err := dst.Close(); err != nil {
+			src.Close()
+			return err
+		}
+		src.Close()
 	}
 	return nil
 }

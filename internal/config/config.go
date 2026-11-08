@@ -51,6 +51,9 @@ type Settings struct {
 	Theme       string       `json:"theme"`     // dark | light | claude
 	UIScale     float64      `json:"uiScale"`   // MinUIScale .. MaxUIScale
 	AccelMode   string       `json:"accelMode"` // auto | cpu
+	// GpuRuntimeDisabled records a GPU runtime whose verification failed, so
+	// the app does not retry (and cannot crash on) it at every start.
+	GpuRuntimeDisabled string `json:"gpuRuntimeDisabled,omitempty"`
 }
 
 // Defaults returns the starting settings.

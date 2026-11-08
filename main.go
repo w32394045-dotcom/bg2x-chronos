@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,12 +13,37 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"github.com/w32394045-dotcom/bg2x-chronos/internal/browser"
+	"github.com/w32394045-dotcom/bg2x-chronos/internal/engine"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
+	// Child-process runtime gate: the GUI runs this binary with --probe-json and
+	// a candidate CHRONOS_ORT_DIR to verify a downloaded GPU runtime without
+	// risking the GUI process itself (the native loader caches a loaded library
+	// for the whole process lifetime).
+	if len(os.Args) > 1 && (os.Args[1] == "--probe-json" || os.Args[1] == "probe") {
+		probe := engine.GetProbe()
+		payload := map[string]any{
+			"ort":       probe.ORT.Available,
+			"version":   probe.ORT.Version,
+			"providers": probe.ORT.Providers,
+			"openvino":  probe.OpenVINO.Available,
+		}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "chronos:", err)
+			os.Exit(2)
+		}
+		fmt.Println(string(data))
+		if !probe.ORT.Available {
+			os.Exit(3)
+		}
+		return
+	}
+
 	app := NewApp()
 
 	// Browser mode: explicit switch, missing WebView2, or a headless Linux

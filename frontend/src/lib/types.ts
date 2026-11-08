@@ -173,6 +173,8 @@ export interface GpuRuntimeState {
   installable: boolean
   version: string
   sizeMb: number
+  /** 实验性运行时（Linux 的 CUDA/OpenVINO，需要真机复验） */
+  experimental?: boolean
 }
 
 /** 加速视图：Active 是实际在用的，其余是这台机器能用的。 */
@@ -194,6 +196,9 @@ export interface AccelStatus {
   installError?: string
   /** 安装完成后需要重启应用才会真正启用 GPU */
   restartRequired?: boolean
+  /** 自检失败后已自动关闭 */
+  runtimeDisabled?: boolean
+  verifyError?: string
 }
 
 export interface InhibitRequest {

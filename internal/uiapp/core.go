@@ -169,6 +169,7 @@ type Core struct {
 	// optional ONNX Runtime components (P3 GPU runtime download)
 	runtimeMgr      *chronosruntime.Manager
 	restartRequired bool
+	gpuVerifyError  string
 }
 
 // New creates the core. Call SetEmitter before Startup to receive the boot
@@ -268,8 +269,15 @@ func (c *Core) initialise() {
 	c.runtimeMgr.SetLogger(func(format string, args ...any) {
 		c.log("info", fmt.Sprintf(format, args...))
 	})
-	if settings.AccelMode != config.AccelCPU {
-		if dir, ok := c.runtimeMgr.Activate(c.runtimeMgr.GpuFlavor()); ok {
+	if flavor := c.runtimeMgr.GpuFlavor(); flavor != "" && settings.AccelMode != config.AccelCPU && settings.GpuRuntimeDisabled != flavor {
+		if !c.runtimeMgr.Installed(flavor) {
+			c.logLocked("info", "未安装 GPU 运行时（可在设置中下载）")
+		} else if err := c.runtimeMgr.Verify(context.Background(), exePath(), flavor); err != nil {
+			c.gpuVerifyError = err.Error()
+			c.logLocked("warn", "GPU 运行时自检失败，已自动关闭: "+err.Error())
+			settings.GpuRuntimeDisabled = flavor
+			_ = settings.Save(dataDir)
+		} else if dir, ok := c.runtimeMgr.Activate(flavor); ok {
 			c.logLocked("info", "已启用 GPU 运行时: "+dir)
 		}
 	}
@@ -766,3 +774,13 @@ func revealPath(path string) error {
 // Context is unused today but keeps the exported surface stable for shells that
 // want to pass a cancellation context (browser server shutdown, tests).
 var _ = context.Background
+
+// exePath is the running binary; the runtime gate re-executes it with
+// --probe-json to verify a candidate GPU runtime in a child process.
+func exePath() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return path
+}

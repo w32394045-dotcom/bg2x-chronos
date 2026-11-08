@@ -19,20 +19,25 @@ type AccelStatus struct {
 	GpuUsable      bool        `json:"gpuUsable"`
 	FallbackReason string      `json:"fallbackReason"`
 
-	// GPU runtime component (docs/CONTRACTS.md v3, P3).
+	// Optional GPU runtime component (P3).
 	GpuRuntime      runtime.State `json:"gpuRuntime"`
 	InstallPhase    string        `json:"installPhase"` // "" | resolving|downloading|installing|done|failed
-	InstallPart     string        `json:"installPart"`  // 当前下载的组件包名
+	InstallPart     string        `json:"installPart"`
 	InstallDone     int64         `json:"installDone"`
 	InstallTotal    int64         `json:"installTotal"`
 	InstallError    string        `json:"installError"`
 	RestartRequired bool          `json:"restartRequired"`
+	// RuntimeDisabled is true when verification failed and the runtime was
+	// automatically switched off (settings remember this flavor).
+	RuntimeDisabled bool   `json:"runtimeDisabled"`
+	VerifyError     string `json:"verifyError"`
 }
 
 // GetAccelStatus reports the persisted preference plus the live runtime probe.
 func (c *Core) GetAccelStatus() AccelStatus {
 	c.mu.Lock()
 	settings, info := c.settings, c.engineInfo
+	verifyErr := c.gpuVerifyError
 	c.mu.Unlock()
 
 	mode := config.AccelAuto
@@ -57,12 +62,15 @@ func (c *Core) GetAccelStatus() AccelStatus {
 		Available:      available,
 		GpuUsable:      device == "GPU",
 		FallbackReason: reason,
+		VerifyError:    verifyErr,
 	}
 	if mgr := c.runtimeManager(); mgr != nil {
-		status.GpuRuntime = mgr.State(mgr.GpuFlavor())
+		flavor := mgr.GpuFlavor()
+		status.GpuRuntime = mgr.State(flavor)
 		phase, part, done, total, lastErr := mgr.Progress()
 		status.InstallPhase, status.InstallPart = phase, part
 		status.InstallDone, status.InstallTotal, status.InstallError = done, total, lastErr
+		status.RuntimeDisabled = settings != nil && flavor != "" && settings.GpuRuntimeDisabled == flavor
 	}
 	return status
 }
@@ -74,8 +82,8 @@ func (c *Core) runtimeManager() *runtime.Manager {
 	return c.runtimeMgr
 }
 
-// InstallAccelRuntime downloads and installs the GPU runtime component in the
-// background. Progress is reported through chronos:accel events.
+// InstallAccelRuntime downloads (when needed) and verifies the GPU runtime. The
+// verification runs in a CHILD PROCESS; a failure auto-disables the runtime.
 func (c *Core) InstallAccelRuntime() (AccelStatus, error) {
 	mgr := c.runtimeManager()
 	if mgr == nil {
@@ -85,22 +93,53 @@ func (c *Core) InstallAccelRuntime() (AccelStatus, error) {
 	if phase == "downloading" || phase == "installing" || phase == "resolving" {
 		return c.GetAccelStatus(), nil
 	}
-	if mgr.Installed(runtime.FlavorDirectML) {
-		return c.GetAccelStatus(), nil
+	flavor := mgr.GpuFlavor()
+	if flavor == "" {
+		return c.GetAccelStatus(), fmt.Errorf("此平台没有可用的 GPU 运行时（DirectML 仅 Windows；CUDA 需 NVIDIA；OpenVINO 需 Intel）")
 	}
+
+	verifyAndEnable := func() {
+		if err := mgr.Verify(context.Background(), exePath(), flavor); err != nil {
+			c.log("warn", "GPU 运行时自检失败，已自动关闭: "+err.Error())
+			c.mu.Lock()
+			c.gpuVerifyError = err.Error()
+			if c.settings != nil {
+				c.settings.GpuRuntimeDisabled = flavor
+				if c.dataDir != "" {
+					_ = c.settings.Save(c.dataDir)
+				}
+			}
+			c.mu.Unlock()
+			return
+		}
+		c.log("info", "GPU 运行时自检通过；重启应用后启用 GPU")
+		c.mu.Lock()
+		c.restartRequired = true
+		c.gpuVerifyError = ""
+		if c.settings != nil {
+			c.settings.GpuRuntimeDisabled = ""
+			if c.dataDir != "" {
+				_ = c.settings.Save(c.dataDir)
+			}
+		}
+		c.mu.Unlock()
+	}
+
+	if mgr.Installed(flavor) {
+		verifyAndEnable()
+		status := c.GetAccelStatus()
+		c.emit("chronos:accel", status)
+		return status, nil
+	}
+
 	go func() {
-		err := mgr.Install(context.Background())
-		if err != nil {
+		if err := mgr.Install(context.Background()); err != nil {
 			c.log("warn", "GPU 运行时安装失败: "+err.Error())
 		} else {
-			c.log("info", "GPU 运行时安装完成；重启应用后启用 GPU")
-			c.mu.Lock()
-			c.restartRequired = true
-			c.mu.Unlock()
+			verifyAndEnable()
 		}
 		c.emit("chronos:accel", c.GetAccelStatus())
 	}()
-	// Emit a first "resolving" snapshot so the UI reacts immediately.
 	return c.GetAccelStatus(), nil
 }
 
