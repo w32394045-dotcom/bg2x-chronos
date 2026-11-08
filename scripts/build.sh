@@ -434,8 +434,10 @@ log "checking required tools (missing tools are reported with install hints)"
 have go || die "go is not on PATH. Install Go 1.26+ from https://go.dev/dl/ (or 'winget install GoLang.Go' on Windows)."
 GO_FULL="$(go version 2>/dev/null || true)"
 [ -n "${GO_FULL}" ] || die "'go version' failed; check your Go installation (https://go.dev/dl/)."
-GO_VER="${GO_FULL#*go}"
-GO_VER="${GO_VER%% *}"
+# "go version go1.26.0 linux/amd64" -> "1.26.0" (also copes with "go1.26.0-devel").
+GO_VER="${GO_FULL##*go}"
+GO_VER="${GO_VER%%[!0-9.]*}"
+[ -n "${GO_VER}" ] || die "cannot parse the Go version from '${GO_FULL}'"
 log "go            : ${GO_FULL}"
 GO_REQ="$(awk '$1 == "go" { print $2; exit }' go.mod 2>/dev/null || true)"
 if [ -n "${GO_REQ}" ]; then
